@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["crates/faraday"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["Faraday"]
+
+[workspace.dependencies]
+cef = { version = "152.0.0", features = ["build-util"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[workspace.dependencies.windows-sys]
+version = "0.61"
+features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"]
