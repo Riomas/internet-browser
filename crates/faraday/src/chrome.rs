@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use cef::*;
 
+use crate::downloads::{DownloadEntry, DownloadState, Downloads};
 use crate::handler::{FaradayClient, FaradayHandler, RenderBuffer, ViewSize};
 use crate::history::{History, HistoryEntry};
 use crate::icons;
@@ -157,6 +158,18 @@ fn resolve_input(input: &str, search_engine: &str) -> String {
     }
 }
 
+/// Formate une vitesse de téléchargement (octets/s) en texte lisible.
+fn format_speed(bytes_per_sec: i64) -> String {
+    let b = bytes_per_sec.max(0) as f64;
+    if b >= 1024.0 * 1024.0 {
+        format!("{:.1} Mo/s", b / (1024.0 * 1024.0))
+    } else if b >= 1024.0 {
+        format!("{:.0} Ko/s", b / 1024.0)
+    } else {
+        format!("{b:.0} o/s")
+    }
+}
+
 /// Un onglet : son navigateur CEF (OSR), son tampon de pixels et sa texture egui.
 pub struct Tab {
     url: String,
@@ -176,8 +189,12 @@ pub struct FaradayChrome {
     search_engine: String,
     /// Historique de navigation partagé (rempli par les handlers CEF).
     history: History,
+    /// Téléchargements partagés (remplis par le DownloadHandler CEF).
+    downloads: Downloads,
     /// La fenêtre « Historique » est ouverte ?
     show_history: bool,
+    /// La fenêtre « Téléchargements » est ouverte ?
+    show_downloads: bool,
     /// Requête saisie dans la barre de la page de nouvel onglet.
     ntp_query: String,
     left_down: bool,
@@ -195,6 +212,7 @@ impl FaradayChrome {
         let session_data = session::load();
         let history: History = Arc::new(Mutex::new(session_data.history));
         let search_engine = PrivacyConfig::load().default_search_engine;
+        let downloads: Downloads = Arc::new(Mutex::new(Vec::new()));
 
         let mut tabs: Vec<Tab> = session_data
             .tabs
@@ -225,7 +243,9 @@ impl FaradayChrome {
             url,
             search_engine,
             history,
+            downloads,
             show_history: false,
+            show_downloads: false,
             ntp_query: String::new(),
             left_down: false,
             page_focused: false,
@@ -269,6 +289,7 @@ impl FaradayChrome {
             buffer,
             self.view_size.clone(),
             self.history.clone(),
+            self.downloads.clone(),
         );
         let settings = BrowserSettings {
             windowless_frame_rate: 60,
@@ -804,6 +825,153 @@ impl FaradayChrome {
         }
     }
 
+    /// Fenêtre flottante « Téléchargements » : progression, annulation, dossier.
+    fn downloads_window(&mut self, ctx: &egui::Context) {
+        if !self.show_downloads {
+            return;
+        }
+        let mut open = true;
+        let mut cancel_ids: Vec<u32> = Vec::new();
+        let mut open_paths: Vec<String> = Vec::new();
+        let mut clear_finished = false;
+
+        egui::Window::new("Téléchargements")
+            .open(&mut open)
+            .default_width(540.0)
+            .default_height(380.0)
+            .collapsible(false)
+            .resizable(true)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.strong("Téléchargements");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add(
+                                egui::Button::new(egui::RichText::new(icons::TRASH).size(15.0))
+                                    .frame(false),
+                            )
+                            .on_hover_text("Effacer les éléments terminés")
+                            .clicked()
+                        {
+                            clear_finished = true;
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(2.0);
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let entries: Vec<DownloadEntry> = self.downloads.lock().unwrap().clone();
+                    if entries.is_empty() {
+                        ui.add_space(16.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                egui::RichText::new("Aucun téléchargement pour l'instant.")
+                                    .color(egui::Color32::from_gray(150)),
+                            );
+                        });
+                        return;
+                    }
+                    for e in &entries {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(&e.name).size(13.0).strong());
+                                let sub = if e.state == DownloadState::InProgress && e.speed > 0 {
+                                    format!("{} · {}", e.state.label(), format_speed(e.speed))
+                                } else {
+                                    e.state.label().to_string()
+                                };
+                                ui.label(
+                                    egui::RichText::new(sub)
+                                        .size(11.0)
+                                        .color(egui::Color32::from_gray(150)),
+                                );
+                            });
+                            ui.add_space(8.0);
+
+                            let frac = if e.total > 0 {
+                                (e.received as f32 / e.total as f32).clamp(0.0, 1.0)
+                            } else {
+                                0.0
+                            };
+                            let pct = e.percent.max(0);
+                            let bar = ui.add(
+                                egui::ProgressBar::new(frac)
+                                    .desired_width((ui.available_width() - 72.0).max(60.0))
+                                    .text(format!("{pct}%")),
+                            );
+                            let _ = bar;
+
+                            // Bouton d'annulation si en cours.
+                            if e.state == DownloadState::InProgress
+                                || e.state == DownloadState::Starting
+                            {
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new(icons::X)
+                                                .size(12.0)
+                                                .color(egui::Color32::from_rgb(255, 90, 90)),
+                                        )
+                                        .min_size(egui::vec2(26.0, 26.0))
+                                        .frame(false),
+                                    )
+                                    .on_hover_text("Annuler")
+                                    .clicked()
+                                {
+                                    cancel_ids.push(e.id);
+                                }
+                            }
+                            // Ouvrir le dossier si terminé.
+                            if e.state == DownloadState::Complete && !e.path.is_empty() {
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new(icons::FOLDER_OPEN)
+                                                .size(13.0)
+                                                .color(egui::Color32::from_gray(190)),
+                                        )
+                                        .min_size(egui::vec2(26.0, 26.0))
+                                        .frame(false),
+                                    )
+                                    .on_hover_text("Ouvrir le dossier")
+                                    .clicked()
+                                {
+                                    open_paths.push(e.path.clone());
+                                }
+                            }
+                        });
+                        ui.separator();
+                    }
+                });
+            });
+
+        // Demander l'annulation (le handler CEF l'exécutera à la prochaine
+        // mise à jour du téléchargement).
+        for id in cancel_ids {
+            let mut list = self.downloads.lock().unwrap();
+            if let Some(e) = list.iter_mut().find(|e| e.id == id) {
+                e.cancel_requested = true;
+            }
+        }
+        for path in open_paths {
+            let _ = std::process::Command::new("explorer.exe")
+                .arg("/select,")
+                .arg(&path)
+                .spawn();
+        }
+        if clear_finished {
+            self.downloads
+                .lock()
+                .unwrap()
+                .retain(|e| matches!(e.state, DownloadState::Starting | DownloadState::InProgress));
+        }
+        if !open {
+            self.show_downloads = false;
+        }
+    }
+
     /// Dessine la barre d'onglets + boutons nouveau/fermer.
     fn tab_strip(&mut self, ui: &mut egui::Ui) {
         let mut to_close: Option<usize> = None;
@@ -883,12 +1051,13 @@ impl eframe::App for FaradayChrome {
 
         // Raccourcis clavier du chrome (avant tout envoi à la page).
         {
-            let (t, l, h) = ctx.input(|i| {
+            let (t, l, h, j) = ctx.input(|i| {
                 let c = i.modifiers.ctrl;
                 (
                     c && i.key_pressed(egui::Key::T),
                     c && i.key_pressed(egui::Key::L),
                     c && i.key_pressed(egui::Key::H),
+                    c && i.key_pressed(egui::Key::J),
                 )
             });
             if t {
@@ -896,6 +1065,9 @@ impl eframe::App for FaradayChrome {
             }
             if h {
                 self.show_history = !self.show_history;
+            }
+            if j {
+                self.show_downloads = !self.show_downloads;
             }
             if l {
                 if let Some(id) = self.address_bar_id {
@@ -957,8 +1129,8 @@ impl eframe::App for FaradayChrome {
                     ui.add_space(4.0);
 
                     // Barre d'adresse : occupe l'espace restant après les
-                    // boutons fixes de droite (Historique + Aller + bouclier).
-                    let addr_w = (ui.available_width() - 165.0).max(80.0);
+                    // boutons fixes de droite (Tél. + Hist. + Aller + bouclier).
+                    let addr_w = (ui.available_width() - 200.0).max(80.0);
                     let addr = ui.add_sized(
                         [addr_w, 30.0],
                         egui::TextEdit::singleline(&mut self.url)
@@ -990,6 +1162,19 @@ impl eframe::App for FaradayChrome {
 
                     ui.add_space(4.0);
                     ui.separator();
+                    ui.add_space(4.0);
+
+                    // Téléchargements (fenêtre flottante).
+                    let dl = ui.add(
+                        egui::Button::new(
+                            egui::RichText::new(icons::DOWNLOAD).size(18.0),
+                        )
+                        .min_size(egui::vec2(30.0, 30.0)),
+                    );
+                    if dl.on_hover_text("Téléchargements (Ctrl+J)").clicked() {
+                        self.show_downloads = !self.show_downloads;
+                    }
+
                     ui.add_space(4.0);
 
                     // Historique (fenêtre flottante).
@@ -1072,8 +1257,9 @@ impl eframe::App for FaradayChrome {
             self.forward_input(ctx, rect, &response);
         });
 
-        // Fenêtre flottante d'historique (par-dessus le contenu).
+        // Fenêtres flottantes (historique, téléchargements) par-dessus la page.
         self.history_window(ctx);
+        self.downloads_window(ctx);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

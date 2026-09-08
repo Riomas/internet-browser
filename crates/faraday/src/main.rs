@@ -11,6 +11,7 @@
 
 mod app;
 mod chrome;
+mod downloads;
 mod handler;
 mod history;
 mod icons;

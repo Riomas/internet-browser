@@ -7,6 +7,7 @@
 use cef::*;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
+use crate::downloads::{self, DownloadEntry, DownloadState, Downloads};
 use crate::history::{self, History};
 
 /// Liste de domaines de tracking / publicité bloqués (extrait — Phase 0).
@@ -82,6 +83,7 @@ wrap_client! {
         buffer: Arc<Mutex<RenderBuffer>>,
         view_size: ViewSize,
         history: History,
+        downloads: Downloads,
     }
 
     impl Client {
@@ -103,6 +105,172 @@ wrap_client! {
 
         fn render_handler(&self) -> Option<RenderHandler> {
             Some(FaradayRenderHandler::new(self.buffer.clone(), self.view_size.clone()))
+        }
+
+        fn download_handler(&self) -> Option<DownloadHandler> {
+            Some(FaradayDownloadHandler::new(self.downloads.clone()))
+        }
+    }
+}
+
+/// Convertit une `CefStringUserfree` (UTF-16) en `String` Rust.
+fn userfree_to_string(raw: &CefStringUserfree) -> String {
+    CefStringUtf16::from(raw).to_string()
+}
+
+wrap_download_handler! {
+    struct FaradayDownloadHandler {
+        downloads: Downloads,
+    }
+
+    impl DownloadHandler {
+        fn can_download(
+            &self,
+            _browser: Option<&mut Browser>,
+            _url: Option<&CefString>,
+            _request_method: Option<&CefString>,
+        ) -> ::std::os::raw::c_int {
+            // Le défaut de cef-rs renvoie 0 (bloque le téléchargement).
+            // Faraday autorise les téléchargements.
+            1
+        }
+
+        fn on_before_download(
+            &self,
+            _browser: Option<&mut Browser>,
+            download_item: Option<&mut DownloadItem>,
+            suggested_name: Option<&CefString>,
+            callback: Option<&mut BeforeDownloadCallback>,
+        ) -> ::std::os::raw::c_int {
+            // « Return true (1) and execute callback » : on choisit le chemin
+            // de destination (dossier Téléchargements) puis on continue.
+            let Some(item) = download_item else { return 1 };
+            let Some(cb) = callback else { return 1 };
+
+            let id = item.id();
+            let url = userfree_to_string(&item.original_url());
+            let mut name = suggested_name
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            if name.trim().is_empty() {
+                name = userfree_to_string(&item.suggested_file_name());
+            }
+            let safe = downloads::safe_file_name(if name.trim().is_empty() {
+                "telechargement"
+            } else {
+                name.trim()
+            });
+
+            // Dossier de destination (créé si besoin) + nom unique.
+            let dir = downloads::downloads_dir();
+            let _ = std::fs::create_dir_all(&dir);
+            let path = downloads::unique_path(&dir, &safe);
+
+            {
+                let mut list = self.downloads.lock().unwrap();
+                downloads::upsert(
+                    &mut list,
+                    DownloadEntry {
+                        id,
+                        url: url.clone(),
+                        name: safe.clone(),
+                        path: path.to_string_lossy().to_string(),
+                        state: DownloadState::Starting,
+                        percent: 0,
+                        speed: 0,
+                        received: 0,
+                        total: 0,
+                        cancel_requested: false,
+                    },
+                );
+            }
+
+            let path_str = path.to_string_lossy().to_string();
+            let full = CefString::from(path_str.as_str());
+            cb.cont(Some(&full), 0);
+            1
+        }
+
+        fn on_download_updated(
+            &self,
+            _browser: Option<&mut Browser>,
+            download_item: Option<&mut DownloadItem>,
+            callback: Option<&mut DownloadItemCallback>,
+        ) {
+            let Some(item) = download_item else { return };
+            let id = item.id();
+
+            let state = if item.is_complete() != 0 {
+                DownloadState::Complete
+            } else if item.is_canceled() != 0 {
+                DownloadState::Cancelled
+            } else if item.is_interrupted() != 0 {
+                DownloadState::Interrupted
+            } else if item.is_in_progress() != 0 {
+                DownloadState::InProgress
+            } else {
+                DownloadState::Starting
+            };
+
+            let full_path = {
+                let raw = item.full_path();
+                userfree_to_string(&raw)
+            };
+
+            // Récupère l'état existant (sans garder d'emprunt sur la liste).
+            let (mut url, mut name, mut path, mut cancel) =
+                (String::new(), String::new(), String::new(), false);
+            {
+                let mut list = self.downloads.lock().unwrap();
+                if let Some(e) = list.iter_mut().find(|e| e.id == id) {
+                    url = e.url.clone();
+                    name = e.name.clone();
+                    path = e.path.clone();
+                    cancel = e.cancel_requested;
+                }
+            }
+
+            if name.trim().is_empty() {
+                let raw = item.suggested_file_name();
+                name = userfree_to_string(&raw);
+            }
+            if url.is_empty() {
+                let raw = item.original_url();
+                url = userfree_to_string(&raw);
+            }
+            if !full_path.is_empty() {
+                path = full_path;
+            }
+
+            {
+                let mut list = self.downloads.lock().unwrap();
+                downloads::upsert(
+                    &mut list,
+                    DownloadEntry {
+                        id,
+                        url,
+                        name,
+                        path,
+                        state,
+                        percent: item.percent_complete(),
+                        speed: item.current_speed(),
+                        received: item.received_bytes() as u64,
+                        total: item.total_bytes() as u64,
+                        cancel_requested: false,
+                    },
+                );
+            }
+
+            // Annulation demandée par l'UI : on exécute le callback ici.
+            if cancel {
+                if let Some(cb) = callback {
+                    cb.cancel();
+                }
+                let mut list = self.downloads.lock().unwrap();
+                if let Some(e) = list.iter_mut().find(|e| e.id == id) {
+                    e.state = DownloadState::Cancelled;
+                }
+            }
         }
     }
 }

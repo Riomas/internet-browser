@@ -25,6 +25,10 @@ pub const PLUS: &str = "\u{E3D4}";
 pub const X: &str = "\u{E4F6}";
 /// Poubelle (effacer).
 pub const TRASH: &str = "\u{E4A6}";
+/// Télécharger.
+pub const DOWNLOAD: &str = "\u{E20A}";
+/// Ouvrir un dossier.
+pub const FOLDER_OPEN: &str = "\u{E256}";
 /// Globe (web générique).
 pub const GLOBE: &str = "\u{E288}";
 /// Article / document.
