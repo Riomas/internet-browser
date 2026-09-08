@@ -194,6 +194,24 @@ struct Toast {
     life: f32,
 }
 
+/// Commande choisie dans le menu contextuel (clic droit).
+#[derive(Clone, Copy, PartialEq)]
+enum CtxCommand {
+    CopyLink,
+    OpenLinkTab,
+    OpenLinkHere,
+    CopyPage,
+    Reload,
+    Back,
+    Forward,
+}
+
+/// État du menu contextuel (position + lien sous le pointeur).
+struct CtxMenu {
+    pos: egui::Pos2,
+    link: String,
+}
+
 pub struct FaradayChrome {
     /// Taille de la zone de rendu (partagée par tous les onglets).
     view_size: ViewSize,
@@ -221,6 +239,8 @@ pub struct FaradayChrome {
     /// Le focus clavier est sur la page web (vs barre d'adresse).
     page_focused: bool,
     address_bar_id: Option<egui::Id>,
+    /// Menu contextuel (clic droit) ouvert sur la page.
+    ctx_menu: Option<CtxMenu>,
 }
 
 impl FaradayChrome {
@@ -275,6 +295,7 @@ impl FaradayChrome {
             left_down: false,
             page_focused: false,
             address_bar_id: None,
+            ctx_menu: None,
         }
     }
 
@@ -540,7 +561,10 @@ impl FaradayChrome {
                 host.send_mouse_move_event(Some(&MouseEvent { x, y, modifiers: mods }), 0)
             });
 
-            let pressed = response.is_pointer_button_down_on();
+            // Clic GAUCHE uniquement : `is_pointer_button_down_on()` est aussi
+            // vrai pour le bouton droit, ce qui cliquerait le lien sous le
+            // pointeur au lieu d'ouvrir le menu contextuel.
+            let pressed = ctx.input(|i| i.pointer.button_down(egui::PointerButton::Primary));
             if pressed && !self.left_down {
                 self.left_down = true;
                 self.with_host(|host| {
@@ -573,6 +597,23 @@ impl FaradayChrome {
                         dy,
                     )
                 });
+            }
+        }
+
+        // --- Clic droit : ouvre notre menu contextuel (remplace le menu
+        // natif Chromium, que l'on n'envoie volontairement pas à CEF). ---
+        if self.ctx_menu.is_none() && response.secondary_clicked() {
+            if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
+                self.ctx_menu = Some(CtxMenu {
+                    pos,
+                    link: self.hovered_link(),
+                });
+                // Comme un clic gauche : la page garde le focus.
+                self.page_focused = true;
+                if let Some(id) = self.address_bar_id {
+                    ctx.memory_mut(|m| m.surrender_focus(id));
+                }
+                self.with_host(|host| host.set_focus(1));
             }
         }
 
@@ -1057,6 +1098,131 @@ impl FaradayChrome {
             });
     }
 
+    /// Lien actuellement sous le pointeur (d'après la barre de statut CEF).
+    fn hovered_link(&self) -> String {
+        let raw = self
+            .tabs
+            .get(self.active)
+            .and_then(|t| t.status.lock().ok())
+            .and_then(|s| s.clone())
+            .unwrap_or_default();
+        let trimmed = raw.trim().to_string();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+        let is_url = looks_like_url(&trimmed)
+            || trimmed.contains("://")
+            || trimmed.starts_with("mailto:")
+            || trimmed.starts_with("tel:");
+        if is_url {
+            trimmed
+        } else {
+            String::new()
+        }
+    }
+
+    /// Dessine et gère le menu contextuel (clic droit) sur la page.
+    fn draw_context_menu(&mut self, ctx: &egui::Context) {
+        let Some(menu) = self.ctx_menu.as_ref() else { return };
+        let pos = menu.pos;
+        let link = menu.link.clone();
+        let page = self
+            .tabs
+            .get(self.active)
+            .map(|t| t.url.clone())
+            .unwrap_or_default();
+        let has_link = !link.is_empty();
+        let has_page = !page.is_empty();
+
+        let mut act: Option<CtxCommand> = None;
+        let item = |ui: &mut egui::Ui, icon: &str, label: &str| -> bool {
+            ui.add(
+                egui::Button::new(
+                    egui::RichText::new(format!("{icon}  {label}")).size(13.5),
+                )
+                .min_size(egui::vec2(230.0, 28.0))
+                .frame(false),
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+        };
+
+        egui::Area::new(egui::Id::new("faraday_ctx_menu"))
+            .fixed_pos(pos)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                // Popup LUMINEUSE (texte foncé) pour bien ressortir sur la page.
+                ui.style_mut().visuals = egui::Visuals::light();
+                egui::Frame::new()
+                    .fill(egui::Color32::from_rgb(252, 253, 255))
+                    .stroke(egui::Stroke::new(
+                        1.0_f32,
+                        egui::Color32::from_rgb(160, 166, 178),
+                    ))
+                    .corner_radius(8.0)
+                    .inner_margin(egui::Margin::symmetric(5, 5))
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .max_height(340.0)
+                            .show(ui, |ui| {
+                                if has_link {
+                                    if item(ui, icons::LINK, "Copier le lien") {
+                                        act = Some(CtxCommand::CopyLink);
+                                    }
+                                    if item(ui, icons::PLUS, "Ouvrir dans un nouvel onglet") {
+                                        act = Some(CtxCommand::OpenLinkTab);
+                                    }
+                                    if item(
+                                        ui,
+                                        icons::ARROW_SQUARE_UP_RIGHT,
+                                        "Ouvrir le lien ici",
+                                    ) {
+                                        act = Some(CtxCommand::OpenLinkHere);
+                                    }
+                                    ui.separator();
+                                }
+                                if has_page {
+                                    if item(ui, icons::COPY, "Copier l'adresse de la page") {
+                                        act = Some(CtxCommand::CopyPage);
+                                    }
+                                    ui.separator();
+                                }
+                                if item(ui, icons::ARROWS_CLOCKWISE, "Recharger") {
+                                    act = Some(CtxCommand::Reload);
+                                }
+                                if item(ui, icons::ARROW_LEFT, "Page précédente") {
+                                    act = Some(CtxCommand::Back);
+                                }
+                                if item(ui, icons::ARROW_RIGHT, "Page suivante") {
+                                    act = Some(CtxCommand::Forward);
+                                }
+                            });
+                    });
+            });
+
+        let esc = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        let any_press = ctx.input(|i| i.pointer.any_pressed());
+        if let Some(cmd) = act {
+            self.ctx_menu = None;
+            match cmd {
+                CtxCommand::CopyLink => ctx.copy_text(link),
+                CtxCommand::CopyPage => ctx.copy_text(page),
+                CtxCommand::OpenLinkTab => self.open_tab(link),
+                CtxCommand::OpenLinkHere => {
+                    self.url = link;
+                    self.navigate();
+                    self.page_focused = true;
+                }
+                CtxCommand::Reload => self.reload(),
+                CtxCommand::Back => self.back(),
+                CtxCommand::Forward => self.forward(),
+            }
+        } else if esc || any_press {
+            // Clic ailleurs ou Échap : on ferme le menu.
+            self.ctx_menu = None;
+        }
+    }
+
     /// Convertit une notification de téléchargement en toast affiché.
     fn push_toast(&mut self, notice: DownloadNotice) {
         let (title, icon, color) = match notice.kind {
@@ -1484,6 +1650,9 @@ impl eframe::App for FaradayChrome {
 
         // URL survolée (bas à gauche).
         self.status_bar(ctx);
+
+        // Menu contextuel (clic droit).
+        self.draw_context_menu(ctx);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

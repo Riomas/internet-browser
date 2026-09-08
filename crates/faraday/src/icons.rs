@@ -33,6 +33,12 @@ pub const FOLDER_OPEN: &str = "\u{E256}";
 pub const CHECK: &str = "\u{E182}";
 /// Avertissement.
 pub const WARNING: &str = "\u{E4E0}";
+/// Chaîne / lien.
+pub const LINK: &str = "\u{E2E2}";
+/// Copier (deux rectangles).
+pub const COPY: &str = "\u{E1CA}";
+/// Ouvrir (flèche dans un carré, coin haut-droit).
+pub const ARROW_SQUARE_UP_RIGHT: &str = "\u{E07C}";
 /// Globe (web générique).
 pub const GLOBE: &str = "\u{E288}";
 /// Article / document.
