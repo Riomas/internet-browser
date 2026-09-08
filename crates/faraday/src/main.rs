@@ -42,17 +42,8 @@ fn main() -> anyhow::Result<()> {
     println!("[faraday] processus browser : initialisation");
     assert_eq!(ret, -1, "impossible d'exécuter le processus browser");
 
-    // État partagé entre CEF (rendu OSR) et l'UI egui.
-    let shared = Arc::new(handler::SharedState {
-        buffer: Mutex::new(handler::RenderBuffer {
-            data: Vec::new(),
-            width: 0,
-            height: 0,
-            dirty: false,
-        }),
-        browser: Mutex::new(None),
-        view_size: Mutex::new((0, 0)),
-    });
+    // Taille de la zone de rendu OSR, partagée par tous les onglets.
+    let view_size: handler::ViewSize = Arc::new(Mutex::new((0, 0)));
 
     let mut app = app::FaradayApp::new();
 
@@ -75,7 +66,7 @@ fn main() -> anyhow::Result<()> {
     );
 
     // UI chrome (egui) + page OSR, puis arrêt propre de CEF.
-    let result = chrome::run(shared);
+    let result = chrome::run(view_size);
     cef::shutdown();
     result
 }

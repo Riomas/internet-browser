@@ -20,21 +20,27 @@ const TRACKER_DOMAINS: &[&str] = &[
 /// Domaines qui ne doivent **jamais** être bloqués (sites de confiance).
 const ALLOWED_DOMAINS: &[&str] = &["duckduckgo.com"];
 
-/// État partagé entre CEF (rendu OSR) et l'UI egui (chrome).
-pub struct SharedState {
-    pub buffer: Mutex<RenderBuffer>,
-    pub browser: Mutex<Option<Browser>>,
-    /// Taille de la zone de rendu en pixels logiques (largeur, hauteur).
-    pub view_size: Mutex<(usize, usize)>,
-}
-
-/// Tampon de pixels du rendu OSR (mode CEF windowless).
+/// Tampon de pixels du rendu OSR d'un onglet (mode CEF windowless).
 pub struct RenderBuffer {
     pub data: Vec<u8>,
     pub width: usize,
     pub height: usize,
     pub dirty: bool,
 }
+
+impl RenderBuffer {
+    pub fn new() -> Self {
+        Self {
+            data: Vec::new(),
+            width: 0,
+            height: 0,
+            dirty: false,
+        }
+    }
+}
+
+/// Taille de la zone de rendu partagée par tous les onglets.
+pub type ViewSize = Arc<Mutex<(usize, usize)>>;
 
 static HANDLER: OnceLock<Weak<Mutex<FaradayHandler>>> = OnceLock::new();
 
@@ -71,7 +77,8 @@ impl FaradayHandler {
 wrap_client! {
     pub struct FaradayClient {
         inner: Arc<Mutex<FaradayHandler>>,
-        state: Arc<SharedState>,
+        buffer: Arc<Mutex<RenderBuffer>>,
+        view_size: ViewSize,
     }
 
     impl Client {
@@ -92,7 +99,7 @@ wrap_client! {
         }
 
         fn render_handler(&self) -> Option<RenderHandler> {
-            Some(FaradayRenderHandler::new(self.state.clone()))
+            Some(FaradayRenderHandler::new(self.buffer.clone(), self.view_size.clone()))
         }
     }
 }
@@ -204,7 +211,8 @@ wrap_resource_request_handler! {
 
 wrap_render_handler! {
     struct FaradayRenderHandler {
-        state: Arc<SharedState>,
+        buffer: Arc<Mutex<RenderBuffer>>,
+        view_size: ViewSize,
     }
 
     impl RenderHandler {
@@ -212,7 +220,7 @@ wrap_render_handler! {
             // Taille de la zone de rendu (doit être non nulle en OSR sinon
             // CEF déclenche un DCHECK à la création du browser).
             if let Some(rect) = rect {
-                let (w, h) = *self.state.view_size.lock().unwrap();
+                let (w, h) = *self.view_size.lock().unwrap();
                 if w > 0 && h > 0 {
                     rect.width = w as i32;
                     rect.height = h as i32;
@@ -234,7 +242,7 @@ wrap_render_handler! {
             width: ::std::os::raw::c_int,
             height: ::std::os::raw::c_int,
         ) {
-            let mut buf = self.state.buffer.lock().unwrap();
+            let mut buf = self.buffer.lock().unwrap();
             let size = (width * height * 4) as usize;
             if size > 0 && !buffer.is_null() {
                 unsafe {

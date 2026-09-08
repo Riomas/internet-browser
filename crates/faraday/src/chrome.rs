@@ -2,11 +2,11 @@
 //! page web via CEF en rendu hors-écran (OSR).
 
 use eframe::egui;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use cef::*;
 
-use crate::handler::{self, FaradayClient, FaradayHandler};
+use crate::handler::{FaradayClient, FaradayHandler, RenderBuffer, ViewSize};
 use crate::icons;
 use crate::privacy::PrivacyConfig;
 
@@ -81,11 +81,36 @@ fn key_to_char(key: egui::Key) -> Option<char> {
 
 
 
-pub struct FaradayChrome {
-    state: Arc<handler::SharedState>,
+/// Nom d'hôte d'une URL (pour le libellé d'un onglet).
+fn hostname(url: &str) -> String {
+    let mut rest = url.trim();
+    for p in ["https://", "http://", "ftp://"] {
+        if let Some(r) = rest.strip_prefix(p) {
+            rest = r;
+            break;
+        }
+    }
+    match rest.find('/') {
+        Some(i) => rest[..i].to_string(),
+        None => rest.to_string(),
+    }
+}
+
+/// Un onglet : son navigateur CEF (OSR), son tampon de pixels et sa texture egui.
+pub struct Tab {
     url: String,
+    buffer: Arc<Mutex<RenderBuffer>>,
+    browser: Option<Browser>,
     texture: Option<egui::TextureHandle>,
-    browser_created: bool,
+}
+
+pub struct FaradayChrome {
+    /// Taille de la zone de rendu (partagée par tous les onglets).
+    view_size: ViewSize,
+    tabs: Vec<Tab>,
+    active: usize,
+    /// Contenu de la barre d'adresse (onglet actif).
+    url: String,
     left_down: bool,
     /// Le focus clavier est sur la page web (vs barre d'adresse).
     page_focused: bool,
@@ -93,35 +118,41 @@ pub struct FaradayChrome {
 }
 
 impl FaradayChrome {
-    pub fn new(cc: &eframe::CreationContext<'_>, state: Arc<handler::SharedState>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, view_size: ViewSize) -> Self {
         // Enregistrer les polices d'icônes Phosphor (libres MIT)
         icons::setup_custom_fonts(&cc.egui_ctx);
 
         let config = PrivacyConfig::load();
-        Self {
-            state,
-            url: config.default_search_engine,
+        let url = config.default_search_engine;
+        let tab = Tab {
+            url: url.clone(),
+            buffer: Arc::new(Mutex::new(RenderBuffer::new())),
+            browser: None,
             texture: None,
-            browser_created: false,
+        };
+        Self {
+            view_size,
+            tabs: vec![tab],
+            active: 0,
+            url,
             left_down: false,
             page_focused: false,
             address_bar_id: None,
         }
     }
 
-    /// Crée le navigateur OSR une seule fois, une fois la boucle lancée.
-    fn create_browser(&mut self) {
-        if self.browser_created {
+    /// Crée le navigateur OSR de l'onglet `idx` (une seule fois par onglet).
+    fn make_browser_for(&mut self, idx: usize) {
+        if idx >= self.tabs.len() || self.tabs[idx].browser.is_some() {
             return;
         }
-        self.browser_created = true;
-
-        let client = FaradayClient::new(FaradayHandler::new(), self.state.clone());
+        let buffer = self.tabs[idx].buffer.clone();
+        let client = FaradayClient::new(FaradayHandler::new(), buffer, self.view_size.clone());
         let settings = BrowserSettings {
             windowless_frame_rate: 60,
             ..Default::default()
         };
-        let url = CefString::from(self.url.as_str());
+        let url = CefString::from(self.tabs[idx].url.as_str());
         let window_info = WindowInfo {
             windowless_rendering_enabled: 1,
             ..Default::default()
@@ -137,13 +168,95 @@ impl FaradayChrome {
             None,
         );
         if let Some(browser) = browser {
-            *self.state.browser.lock().unwrap() = Some(browser);
+            if idx != self.active {
+                if let Some(host) = browser.host() {
+                    host.was_hidden(1);
+                }
+            }
+            self.tabs[idx].browser = Some(browser);
         }
     }
 
-    /// Convertit le tampon CEF (BGRA) en texture egui (RGBA) et l'affiche.
-    fn upload_texture(&mut self, ctx: &egui::Context) {
-        let mut buf = self.state.buffer.lock().unwrap();
+    /// Ouvre un nouvel onglet sur `url` et le rend actif.
+    fn open_tab(&mut self, url: String) {
+        // Masquer l'onglet actuel avant d'en créer un nouveau.
+        if let Some(b) = self.tabs[self.active].browser.as_ref() {
+            if let Some(host) = b.host() {
+                host.was_hidden(1);
+                host.set_focus(0);
+            }
+        }
+        let tab = Tab {
+            url,
+            buffer: Arc::new(Mutex::new(RenderBuffer::new())),
+            browser: None,
+            texture: None,
+        };
+        self.tabs.push(tab);
+        self.active = self.tabs.len() - 1;
+        self.make_browser_for(self.active);
+        self.url = self.tabs[self.active].url.clone();
+        self.page_focused = true;
+    }
+
+    /// Rend l'onglet `idx` actif (masque l'ancien, montre le nouveau).
+    fn set_active(&mut self, idx: usize) {
+        if idx >= self.tabs.len() || idx == self.active {
+            return;
+        }
+        let old = self.active;
+        if let Some(b) = self.tabs[old].browser.as_ref() {
+            if let Some(host) = b.host() {
+                host.was_hidden(1);
+                host.set_focus(0);
+            }
+        }
+        self.active = idx;
+        self.make_browser_for(idx);
+        if let Some(b) = self.tabs[idx].browser.as_ref() {
+            if let Some(host) = b.host() {
+                host.was_hidden(0);
+                host.was_resized();
+            }
+        }
+        self.url = self.tabs[idx].url.clone();
+        self.page_focused = true;
+    }
+
+    /// Ferme l'onglet `idx` (jamais le dernier) et sélectionne un voisin.
+    fn close_tab(&mut self, idx: usize) {
+        if self.tabs.len() <= 1 || idx >= self.tabs.len() {
+            return;
+        }
+        let was_active = idx == self.active;
+        // Fermer proprement le navigateur CEF de l'onglet s'il existe.
+        if let Some(b) = self.tabs[idx].browser.take() {
+            if let Some(host) = b.host() {
+                host.close_browser(1);
+            }
+        }
+        self.tabs.remove(idx);
+        if was_active {
+            if self.active >= self.tabs.len() {
+                self.active = self.tabs.len() - 1;
+            }
+            self.make_browser_for(self.active);
+            if let Some(b) = self.tabs[self.active].browser.as_ref() {
+                if let Some(host) = b.host() {
+                    host.was_hidden(0);
+                    host.was_resized();
+                }
+            }
+            self.url = self.tabs[self.active].url.clone();
+        } else if idx < self.active {
+            self.active -= 1;
+        }
+    }
+
+    /// Convertit le tampon CEF (BGRA) de l'onglet actif en texture egui (RGBA).
+    fn upload_active_texture(&mut self, ctx: &egui::Context) {
+        let idx = self.active;
+        let mut buf = self.tabs[idx].buffer.lock().unwrap();
         if !buf.dirty || buf.width == 0 || buf.height == 0 {
             return;
         }
@@ -159,24 +272,31 @@ impl FaradayChrome {
             rgba.push(px[3]); // A
         }
         let color = egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba);
+        buf.dirty = false;
+        drop(buf);
 
-        match &mut self.texture {
+        match &mut self.tabs[idx].texture {
             Some(tex) => tex.set(color, egui::TextureOptions::LINEAR),
             None => {
-                self.texture =
+                self.tabs[idx].texture =
                     Some(ctx.load_texture("page", color, egui::TextureOptions::LINEAR));
             }
         }
-        buf.dirty = false;
     }
 
+    /// Accède au navigateur CEF de l'onglet actif.
     fn with_browser<R>(&self, f: impl FnOnce(&Browser) -> R) -> Option<R> {
-        let browser = self.state.browser.lock().unwrap();
-        browser.as_ref().map(|b| f(b))
+        self.tabs.get(self.active).and_then(|t| t.browser.as_ref()).map(f)
+    }
+
+    /// Accède au `BrowserHost` de l'onglet actif (entrées OSR).
+    fn with_host<R>(&self, f: impl FnOnce(&BrowserHost) -> R) -> Option<R> {
+        self.with_browser(|b| b.host().map(|h| f(&h))).flatten()
     }
 
     fn navigate(&mut self) {
         let url = self.url.clone();
+        self.tabs[self.active].url = url.clone();
         let _ = self.with_browser(|b| {
             if let Some(frame) = b.main_frame() {
                 frame.load_url(Some(&CefString::from(url.as_str())));
@@ -202,7 +322,7 @@ impl FaradayChrome {
         let w = (rect.width() * scale) as usize;
         let h = (rect.height() * scale) as usize;
         let changed = {
-            let mut vs = self.state.view_size.lock().unwrap();
+            let mut vs = self.view_size.lock().unwrap();
             if *vs != (w, h) {
                 *vs = (w, h);
                 true
@@ -213,12 +333,6 @@ impl FaradayChrome {
         if changed {
             self.with_host(|host| host.was_resized());
         }
-    }
-
-    /// Accède au `BrowserHost` (méthodes d'entrée OSR).
-    fn with_host<R>(&self, f: impl FnOnce(&BrowserHost) -> R) -> Option<R> {
-        let browser = self.state.browser.lock().unwrap();
-        browser.as_ref().and_then(|b| b.host().map(|h| f(&h)))
     }
 
     /// Transmet les événements souris/clavier à la page (rendu OSR).
@@ -345,6 +459,66 @@ impl FaradayChrome {
             }
         }
     }
+
+    /// Dessine la barre d'onglets + boutons nouveau/fermer.
+    fn tab_strip(&mut self, ui: &mut egui::Ui) {
+        let mut to_close: Option<usize> = None;
+        let mut to_activate: Option<usize> = None;
+        let mut new_tab = false;
+
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
+
+            let mut i = 0;
+            while i < self.tabs.len() {
+                let active = i == self.active;
+                let title = hostname(&self.tabs[i].url);
+                let label = egui::RichText::new(title).size(13.0);
+                let selected = ui.selectable_label(active, label);
+                if selected.clicked() {
+                    to_activate = Some(i);
+                }
+
+                // Bouton de fermeture (croix) — discret sur l'onglet survolé.
+                let close = ui.add(
+                    egui::Button::new(egui::RichText::new("x").size(11.0).color(
+                        egui::Color32::from_gray(160),
+                    ))
+                    .min_size(egui::vec2(16.0, 16.0))
+                    .frame(false),
+                );
+                if close.on_hover_text("Fermer l'onglet").clicked() {
+                    to_close = Some(i);
+                }
+                i += 1;
+            }
+
+            ui.add_space(4.0);
+            ui.separator();
+            ui.add_space(4.0);
+
+            // Nouvel onglet (+)
+            let plus = ui.add(
+                egui::Button::new(egui::RichText::new("+").size(16.0).strong())
+                    .min_size(egui::vec2(22.0, 22.0)),
+            );
+            if plus.on_hover_text("Nouvel onglet").clicked() {
+                new_tab = true;
+            }
+        });
+
+        // Appliquer les actions après la boucle (éviter les emprunts).
+        if let Some(i) = to_close {
+            self.close_tab(i);
+        }
+        if let Some(i) = to_activate {
+            self.set_active(i);
+        }
+        if new_tab {
+            let config = PrivacyConfig::load();
+            self.open_tab(config.default_search_engine);
+        }
+    }
 }
 
 impl eframe::App for FaradayChrome {
@@ -354,8 +528,19 @@ impl eframe::App for FaradayChrome {
         // Redessiner en continu pour recevoir les on_paint de CEF.
         ctx.request_repaint();
 
-        self.create_browser();
-        self.upload_texture(ctx);
+        self.make_browser_for(self.active);
+        self.upload_active_texture(ctx);
+
+        // --- Barre d'onglets ---
+        egui::TopBottomPanel::top("tabs")
+            .frame(
+                egui::Frame::side_top_panel(&ctx.style())
+                    .fill(egui::Color32::from_rgb(34, 36, 43))
+                    .inner_margin(egui::Margin::symmetric(8, 4)),
+            )
+            .show(ctx, |ui| {
+                self.tab_strip(ui);
+            });
 
         egui::TopBottomPanel::top("chrome")
             .frame(
@@ -454,7 +639,11 @@ impl eframe::App for FaradayChrome {
                 });
             });
 
-        let tex_id = self.texture.as_ref().map(|t| t.id());
+        let tex_id = self
+            .tabs
+            .get(self.active)
+            .and_then(|t| t.texture.as_ref())
+            .map(|t| t.id());
         egui::CentralPanel::default().show(ctx, |ui| {
             let avail = ui.available_size();
             let (rect, response) = ui.allocate_exact_size(avail, egui::Sense::click_and_drag());
@@ -488,7 +677,7 @@ impl eframe::App for FaradayChrome {
 }
 
 /// Lance la fenêtre egui (chrome + page OSR).
-pub fn run(state: Arc<handler::SharedState>) -> anyhow::Result<()> {
+pub fn run(view_size: ViewSize) -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 800.0])
@@ -499,7 +688,7 @@ pub fn run(state: Arc<handler::SharedState>) -> anyhow::Result<()> {
     eframe::run_native(
         "Faraday",
         options,
-        Box::new(move |cc| Ok(Box::new(FaradayChrome::new(cc, state)))),
+        Box::new(move |cc| Ok(Box::new(FaradayChrome::new(cc, view_size)))),
     )
     .map_err(|e| anyhow::anyhow!("{e}"))
 }
