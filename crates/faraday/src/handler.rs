@@ -456,10 +456,12 @@ wrap_resource_request_handler! {
                 }
             }
 
-            // Do-Not-Track : en-tête envoyé à chaque requête.
-            let dnt_name = CefString::from("DNT");
-            let dnt_value = CefString::from("1");
-            req.set_header_by_name(Some(&dnt_name), Some(&dnt_value), 1);
+            // Do-Not-Track : en-tête envoyé à chaque requête (si activé).
+            if blocklist::dnt_enabled() {
+                let dnt_name = CefString::from("DNT");
+                let dnt_value = CefString::from("1");
+                req.set_header_by_name(Some(&dnt_name), Some(&dnt_value), 1);
+            }
 
             ReturnValue::CONTINUE
         }

@@ -12,13 +12,16 @@
 //! compteur global permet d'afficher le nombre de blocages sur le bouclier.
 
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// Compteur global de requêtes bloquées (affiché sur le bouclier).
 static BLOCKED: AtomicU64 = AtomicU64::new(0);
 
-/// Liste embarquée au moment de la compilation.
-const BLOCKLIST_SOURCE: &str = include_str!("../configs/blocklist.txt");
+/// Le blocage réseau est-il activé ? (basculable depuis les Paramètres)
+static ENABLED: AtomicBool = AtomicBool::new(true);
+
+/// L'en-tête Do Not Track (`DNT: 1`) est-il envoyé ?
+static DNT: AtomicBool = AtomicBool::new(true);
 
 /// Nombre de requêtes bloquées depuis le démarrage.
 pub fn blocked_count() -> u64 {
@@ -29,6 +32,29 @@ pub fn blocked_count() -> u64 {
 pub fn incr_blocked() {
     BLOCKED.fetch_add(1, Ordering::Relaxed);
 }
+
+/// Le blocage des trackers est-il actif ?
+pub fn enabled() -> bool {
+    ENABLED.load(Ordering::Relaxed)
+}
+
+/// Active/désactive le blocage réseau (paramètre en direct).
+pub fn set_enabled(value: bool) {
+    ENABLED.store(value, Ordering::Relaxed);
+}
+
+/// L'en-tête Do Not Track doit-il être envoyé ?
+pub fn dnt_enabled() -> bool {
+    DNT.load(Ordering::Relaxed)
+}
+
+/// Active/désactive l'envoi de l'en-tête Do Not Track (en direct).
+pub fn set_dnt(value: bool) {
+    DNT.store(value, Ordering::Relaxed);
+}
+
+/// Liste embarquée au moment de la compilation.
+const BLOCKLIST_SOURCE: &str = include_str!("../configs/blocklist.txt");
 
 struct Rule {
     /// Domaine racine de la règle (minuscules, sans `www.` obligatoire).
@@ -137,6 +163,9 @@ pub fn host_of(url: &str) -> String {
 
 /// Décide si une URL doit être bloquée (liste de règles) ou non.
 pub fn should_block(url: &str) -> bool {
+    if !enabled() {
+        return false;
+    }
     let host = host_of(url);
     list().blocks(&host)
 }

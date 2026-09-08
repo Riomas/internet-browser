@@ -7,11 +7,17 @@
 //!   - le **blocage réseau** dans le `RequestHandler` (voir `handler.rs`).
 
 use cef::{CommandLine, ImplCommandLine};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+use crate::blocklist;
 
 /// Configuration de confidentialité chargée depuis `configs/privacy.toml`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrivacyConfig {
+    /// Bloque les requêtes vers les domaines de la blocklist (en direct).
+    pub enable_tracker_blocking: bool,
+    /// Envoie l'en-tête Do Not Track (`DNT: 1`) (en direct).
+    pub enable_do_not_track: bool,
     /// Désactive les mises à jour de composants (télémesure).
     pub disable_component_update: bool,
     /// Désactive les applications par défaut.
@@ -38,6 +44,8 @@ pub struct PrivacyConfig {
 impl Default for PrivacyConfig {
     fn default() -> Self {
         Self {
+            enable_tracker_blocking: true,
+            enable_do_not_track: true,
             disable_component_update: true,
             disable_default_apps: true,
             disable_sync: true,
@@ -61,7 +69,7 @@ impl PrivacyConfig {
     /// par défaut si le fichier est absent/invalide.
     pub fn load() -> Self {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/configs/privacy.toml");
-        match std::fs::read_to_string(path) {
+        let config = match std::fs::read_to_string(path) {
             Ok(content) => toml::from_str(&content)
                 .map(|cfg: FileConfig| cfg.privacy)
                 .unwrap_or_else(|e| {
@@ -69,12 +77,37 @@ impl PrivacyConfig {
                     PrivacyConfig::default()
                 }),
             Err(_) => PrivacyConfig::default(),
+        };
+        // Applique immédiatement les réglages « en direct » (blocage, DNT).
+        config.apply_runtime();
+        config
+    }
+
+    /// Applique les réglages qui prennent effet sans redémarrage.
+    pub fn apply_runtime(&self) {
+        blocklist::set_enabled(self.enable_tracker_blocking);
+        blocklist::set_dnt(self.enable_do_not_track);
+    }
+
+    /// Persiste la configuration dans `configs/privacy.toml`.
+    pub fn save(&self) {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/configs/privacy.toml");
+        let wrapper = FileConfig {
+            privacy: self.clone(),
+        };
+        match toml::to_string_pretty(&wrapper) {
+            Ok(content) => {
+                if let Err(e) = std::fs::write(path, content) {
+                    eprintln!("[faraday] config privacy: écriture impossible ({e})");
+                }
+            }
+            Err(e) => eprintln!("[faraday] config privacy: sérialisation impossible ({e})"),
         }
     }
 }
 
 /// Enveloppe du fichier TOML (`[privacy]`).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct FileConfig {
     privacy: PrivacyConfig,
 }

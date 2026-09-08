@@ -234,6 +234,10 @@ pub struct FaradayChrome {
     show_history: bool,
     /// La fenêtre « Téléchargements » est ouverte ?
     show_downloads: bool,
+    /// La fenêtre « Paramètres » est ouverte ?
+    settings_open: bool,
+    /// Copie de travail des réglages (Confidentialité, Général…).
+    settings: PrivacyConfig,
     /// Requête saisie dans la barre de la page de nouvel onglet.
     ntp_query: String,
     left_down: bool,
@@ -252,7 +256,8 @@ impl FaradayChrome {
         // Restaure la session précédente (onglets + historique).
         let session_data = session::load();
         let history: History = Arc::new(Mutex::new(session_data.history));
-        let search_engine = PrivacyConfig::load().default_search_engine;
+        let config = PrivacyConfig::load();
+        let search_engine = config.default_search_engine.clone();
         let downloads: Downloads = Arc::new(Mutex::new(Vec::new()));
         let notices: DownloadNotices = Arc::new(Mutex::new(Vec::new()));
 
@@ -292,6 +297,8 @@ impl FaradayChrome {
             toasts: Vec::new(),
             show_history: false,
             show_downloads: false,
+            settings_open: false,
+            settings: config,
             ntp_query: String::new(),
             left_down: false,
             page_focused: false,
@@ -1224,6 +1231,149 @@ impl FaradayChrome {
         }
     }
 
+    /// Fenêtre flottante « Paramètres » (Confidentialité en avant-plan).
+    fn settings_window(&mut self, ctx: &egui::Context) {
+        if !self.settings_open {
+            return;
+        }
+        let mut open = true;
+        let mut reset = false;
+        let mut save = false;
+
+        egui::Window::new("Paramètres")
+            .open(&mut open)
+            .default_width(440.0)
+            .default_height(560.0)
+            .collapsible(false)
+            .resizable(true)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    // ===== Confidentialité (en avant-plan) =====
+                    egui::CollapsingHeader::new(
+                        egui::RichText::new(format!(
+                            "{}  Confidentialité",
+                            icons::LOCK
+                        ))
+                        .size(15.0),
+                    )
+                    .default_open(true)
+                        .show(ui, |ui| {
+                            let mut changed = false;
+                            changed |= ui
+                                .checkbox(
+                                    &mut self.settings.enable_tracker_blocking,
+                                    "Bloquer les trackers et publicités",
+                                )
+                                .changed();
+                            changed |= ui
+                                .checkbox(
+                                    &mut self.settings.enable_do_not_track,
+                                    "Envoyer l'en-tête Do Not Track (DNT)",
+                                )
+                                .changed();
+                            changed |= ui
+                                .checkbox(
+                                    &mut self.settings.block_third_party_cookies,
+                                    "Bloquer les cookies tiers (redémarrage)",
+                                )
+                                .changed();
+                            changed |= ui
+                                .checkbox(
+                                    &mut self.settings.no_referrer,
+                                    "Ne pas envoyer de Referer (redémarrage)",
+                                )
+                                .changed();
+                            changed |= ui
+                                .checkbox(
+                                    &mut self.settings.force_https,
+                                    "Forcer HTTPS (redémarrage)",
+                                )
+                                .changed();
+                            ui.add_space(4.0);
+                            changed |= ui
+                                .checkbox(
+                                    &mut self.settings.disable_sync,
+                                    "Désactiver la synchronisation (redémarrage)",
+                                )
+                                .changed();
+                            changed |= ui
+                                .checkbox(
+                                    &mut self.settings.disable_suggestions,
+                                    "Désactiver les suggestions (redémarrage)",
+                                )
+                                .changed();
+                            changed |= ui
+                                .checkbox(
+                                    &mut self.settings.disable_personal_autofill,
+                                    "Désactiver l'autofill personnel (redémarrage)",
+                                )
+                                .changed();
+                            if changed {
+                                // Applique en direct les réglages runtime.
+                                self.settings.apply_runtime();
+                            }
+                        });
+                    ui.separator();
+
+                    // ===== Général =====
+                    egui::CollapsingHeader::new(
+                        egui::RichText::new(format!("{}  Général", icons::GLOBE)).size(15.0),
+                    )
+                    .default_open(true)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("Moteur de recherche :");
+                                ui.add(
+                                    egui::TextEdit::singleline(
+                                        &mut self.settings.default_search_engine,
+                                    )
+                                    .desired_width(240.0),
+                                );
+                            });
+                            ui.label(
+                                egui::RichText::new(
+                                    "Utilisé pour les recherches ; la sauvegarde l'applique dès la prochaine navigation.",
+                                )
+                                .size(11.0)
+                                .color(egui::Color32::from_gray(140)),
+                            );
+                        });
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        if ui.button("Rétablir les valeurs par défaut").clicked() {
+                            reset = true;
+                        }
+                        if ui.button("Enregistrer").clicked() {
+                            save = true;
+                        }
+                    });
+                    ui.label(
+                        egui::RichText::new(
+                            "Les réglages marqués « redémarrage » prennent effet au prochain lancement.",
+                        )
+                        .size(11.0)
+                        .color(egui::Color32::from_gray(140)),
+                    );
+                    ui.add_space(4.0);
+                });
+            });
+
+        if reset {
+            self.settings = PrivacyConfig::default();
+            self.settings.apply_runtime();
+            self.settings.save();
+            self.search_engine = self.settings.default_search_engine.clone();
+        }
+        if save {
+            self.settings.save();
+            self.search_engine = self.settings.default_search_engine.clone();
+        }
+        if !open {
+            self.settings_open = false;
+        }
+    }
+
     /// Convertit une notification de téléchargement en toast affiché.
     fn push_toast(&mut self, notice: DownloadNotice) {
         let (title, icon, color) = match notice.kind {
@@ -1491,8 +1641,9 @@ impl eframe::App for FaradayChrome {
                     ui.add_space(4.0);
 
                     // Barre d'adresse : occupe l'espace restant après les
-                    // boutons fixes de droite (Tél. + Hist. + Aller + bouclier).
-                    let addr_w = (ui.available_width() - 200.0).max(80.0);
+                    // boutons fixes de droite (Tél. + Hist. + Régl. + Aller +
+                    // bouclier).
+                    let addr_w = (ui.available_width() - 240.0).max(80.0);
                     let addr = ui.add_sized(
                         [addr_w, 30.0],
                         egui::TextEdit::singleline(&mut self.url)
@@ -1575,19 +1726,43 @@ impl eframe::App for FaradayChrome {
 
                     ui.add_space(4.0);
 
+                    // Paramètres (fenêtre flottante).
+                    let cfg = ui.add(
+                        egui::Button::new(egui::RichText::new(icons::GEAR).size(18.0))
+                            .min_size(egui::vec2(30.0, 30.0)),
+                    );
+                    if cfg.on_hover_text("Paramètres").clicked() {
+                        self.settings_open = !self.settings_open;
+                    }
+
+                    ui.add_space(4.0);
+
                     // Bouclier privacy : compteur de blocages en direct.
                     let blocked = blocklist::blocked_count();
+                    let protection = blocklist::enabled();
+                    let shield_color = if protection {
+                        egui::Color32::from_rgb(52, 199, 89)
+                    } else {
+                        egui::Color32::from_gray(150)
+                    };
+                    let shield_fill = if protection {
+                        egui::Color32::from_rgba_unmultiplied(52, 199, 89, 25)
+                    } else {
+                        egui::Color32::from_rgba_unmultiplied(150, 150, 150, 20)
+                    };
                     let shield = ui.add(
                         egui::Button::new(
                             egui::RichText::new(format!("{} {blocked}", icons::SHIELD_CHECK))
-                                .color(egui::Color32::from_rgb(52, 199, 89))
+                                .color(shield_color)
                                 .strong()
                                 .size(16.0),
                         )
                         .min_size(egui::vec2(44.0, 30.0))
-                        .fill(egui::Color32::from_rgba_unmultiplied(52, 199, 89, 25)),
+                        .fill(shield_fill),
                     );
-                    let tip = if blocked == 0 {
+                    let tip = if !protection {
+                        "Protection anti-tracking désactivée (Paramètres).".to_string()
+                    } else if blocked == 0 {
                         "Aucune requête de tracking bloquée - Faraday protège votre vie privée."
                             .to_string()
                     } else {
@@ -1653,9 +1828,10 @@ impl eframe::App for FaradayChrome {
             self.forward_input(ctx, rect, &response);
         });
 
-        // Fenêtres flottantes (historique, téléchargements) par-dessus la page.
+        // Fenêtres flottantes (historique, téléchargements, paramètres).
         self.history_window(ctx);
         self.downloads_window(ctx);
+        self.settings_window(ctx);
 
         // Notifications toast des téléchargements.
         self.update_toasts(ctx);

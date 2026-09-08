@@ -39,6 +39,10 @@ pub const LINK: &str = "\u{E2E2}";
 pub const COPY: &str = "\u{E1CA}";
 /// Ouvrir (flèche dans un carré, coin haut-droit).
 pub const ARROW_SQUARE_UP_RIGHT: &str = "\u{E07C}";
+/// Réglages : engrenage.
+pub const GEAR: &str = "\u{E270}";
+/// Cadenas (sécurité).
+pub const LOCK: &str = "\u{E2FA}";
 /// Globe (web générique).
 pub const GLOBE: &str = "\u{E288}";
 /// Article / document.

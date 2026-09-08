@@ -1,30 +1,17 @@
-# Couche de confidentialité de Faraday.
-# Tous les trackings sont désactivés PAR DÉFAUT.
-# Ce fichier est chargé par `privacy.rs` au démarrage.
-
 [privacy]
-# Empêche les mises à jour de composants & services de collecte (Google/Microsoft).
+enable_tracker_blocking = false
+enable_do_not_track = true
 disable_component_update = true
 disable_default_apps = true
 disable_sync = true
 disable_suggestions = true
 disable_personal_autofill = true
-
-# Bloque les cookies tiers (un site ne peut pas te suivre sur d'autres sites).
 block_third_party_cookies = true
-
-# N'envoie aucun en-tête Referer.
 no_referrer = true
-
-# Force le passage en HTTPS quand disponible.
 force_https = true
-
-# Features Chromium à désactiver (préchargement, prefetch, préconnexion).
 disable_features = [
     "Preload",
     "PrefetchPrivacyChanges",
     "NetworkService",
 ]
-
-# Moteur de recherche par défaut (respectueux de la vie privée — jamais Google).
 default_search_engine = "https://duckduckgo.com"
