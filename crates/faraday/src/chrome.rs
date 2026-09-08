@@ -10,7 +10,7 @@ use cef::*;
 use crate::downloads::{
     DownloadEntry, DownloadNotice, DownloadNoticeKind, DownloadNotices, DownloadState, Downloads,
 };
-use crate::handler::{FaradayClient, FaradayHandler, RenderBuffer, ViewSize};
+use crate::handler::{FaradayClient, FaradayHandler, RenderBuffer, StatusCell, ViewSize};
 use crate::history::{History, HistoryEntry};
 use crate::icons;
 use crate::privacy::PrivacyConfig;
@@ -179,6 +179,8 @@ pub struct Tab {
     buffer: Arc<Mutex<RenderBuffer>>,
     browser: Option<Browser>,
     texture: Option<egui::TextureHandle>,
+    /// Dernier message de statut (URL survolée par le pointeur).
+    status: StatusCell,
 }
 
 /// Une notification temporaire (toast) affichée en haut à droite.
@@ -241,6 +243,7 @@ impl FaradayChrome {
                 buffer: Arc::new(Mutex::new(RenderBuffer::new())),
                 browser: None,
                 texture: None,
+                status: Arc::new(Mutex::new(None)),
             })
             .collect();
         if tabs.is_empty() {
@@ -250,6 +253,7 @@ impl FaradayChrome {
                 buffer: Arc::new(Mutex::new(RenderBuffer::new())),
                 browser: None,
                 texture: None,
+                status: Arc::new(Mutex::new(None)),
             });
         }
         let active = session_data.active.min(tabs.len() - 1);
@@ -312,6 +316,7 @@ impl FaradayChrome {
             self.history.clone(),
             self.downloads.clone(),
             self.notices.clone(),
+            self.tabs[idx].status.clone(),
         );
         let settings = BrowserSettings {
             windowless_frame_rate: 60,
@@ -356,6 +361,7 @@ impl FaradayChrome {
             buffer: Arc::new(Mutex::new(RenderBuffer::new())),
             browser: None,
             texture: None,
+            status: Arc::new(Mutex::new(None)),
         };
         self.tabs.push(tab);
         self.active = self.tabs.len() - 1;
@@ -994,6 +1000,63 @@ impl FaradayChrome {
         }
     }
 
+    /// Barre de statut en bas à gauche : URL cible sous le pointeur.
+    fn status_bar(&mut self, ctx: &egui::Context) {
+        let raw = self
+            .tabs
+            .get(self.active)
+            .and_then(|t| t.status.lock().ok())
+            .and_then(|s| s.clone())
+            .unwrap_or_default();
+        if raw.is_empty() {
+            return;
+        }
+        // N'affiche que les cibles de lien (URL), pas les messages de
+        // chargement transitoires remontés par CEF.
+        let trimmed = raw.trim();
+        let is_target = looks_like_url(trimmed)
+            || trimmed.contains("://")
+            || trimmed.starts_with("mailto:")
+            || trimmed.starts_with("tel:");
+        if !is_target {
+            return;
+        }
+
+        let mut shown = raw;
+        if shown.chars().count() > 160 {
+            let cut: String = shown.chars().take(160).collect();
+            shown = format!("{cut}…");
+        }
+        let color = if shown.starts_with("https://") {
+            egui::Color32::from_rgb(126, 208, 148)
+        } else {
+            egui::Color32::from_rgb(205, 210, 220)
+        };
+
+        egui::Area::new(egui::Id::new("faraday_status_bar"))
+            .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(10.0, -14.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(egui::Color32::from_rgba_unmultiplied(24, 26, 33, 218))
+                    .stroke(egui::Stroke::new(
+                        1.0_f32,
+                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 20),
+                    ))
+                    .corner_radius(7.0)
+                    .inner_margin(egui::Margin::symmetric(10, 6))
+                    .show(ui, |ui| {
+                        ui.set_max_width(560.0);
+                        ui.label(
+                            egui::RichText::new(shown)
+                                .family(egui::FontFamily::Monospace)
+                                .size(12.0)
+                                .color(color),
+                        );
+                    });
+            });
+    }
+
     /// Convertit une notification de téléchargement en toast affiché.
     fn push_toast(&mut self, notice: DownloadNotice) {
         let (title, icon, color) = match notice.kind {
@@ -1418,6 +1481,9 @@ impl eframe::App for FaradayChrome {
 
         // Notifications toast des téléchargements.
         self.update_toasts(ctx);
+
+        // URL survolée (bas à gauche).
+        self.status_bar(ctx);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

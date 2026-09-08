@@ -47,6 +47,9 @@ impl RenderBuffer {
 /// Taille de la zone de rendu partagée par tous les onglets.
 pub type ViewSize = Arc<Mutex<(usize, usize)>>;
 
+/// Dernier message de statut (URL survolée) d'un onglet.
+pub type StatusCell = Arc<Mutex<Option<String>>>;
+
 static HANDLER: OnceLock<Weak<Mutex<FaradayHandler>>> = OnceLock::new();
 
 pub struct FaradayHandler {
@@ -87,11 +90,16 @@ wrap_client! {
         history: History,
         downloads: Downloads,
         notices: DownloadNotices,
+        status: StatusCell,
     }
 
     impl Client {
         fn display_handler(&self) -> Option<DisplayHandler> {
-            Some(FaradayDisplayHandler::new(self.inner.clone(), self.history.clone()))
+            Some(FaradayDisplayHandler::new(
+                self.inner.clone(),
+                self.history.clone(),
+                self.status.clone(),
+            ))
         }
 
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
@@ -329,6 +337,7 @@ wrap_display_handler! {
     struct FaradayDisplayHandler {
         inner: Arc<Mutex<FaradayHandler>>,
         history: History,
+        status: StatusCell,
     }
 
     impl DisplayHandler {
@@ -350,6 +359,22 @@ wrap_display_handler! {
             }
             if let Some(url) = url {
                 history::push(&self.history, &url.to_string());
+            }
+        }
+
+        fn on_status_message(
+            &self,
+            _browser: Option<&mut Browser>,
+            value: Option<&CefString>,
+        ) {
+            // CEF remplit ce message quand le pointeur survole un lien (URL
+            // cible) et le vide quand il en sort → barre de statut en bas.
+            let text = value.map(|v| v.to_string()).unwrap_or_default();
+            let mut cell = self.status.lock().unwrap();
+            if text.is_empty() {
+                *cell = None;
+            } else {
+                *cell = Some(text);
             }
         }
     }
