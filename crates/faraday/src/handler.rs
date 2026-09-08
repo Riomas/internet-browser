@@ -7,7 +7,9 @@
 use cef::*;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
-use crate::downloads::{self, DownloadEntry, DownloadState, Downloads};
+use crate::downloads::{
+    self, DownloadEntry, DownloadNoticeKind, DownloadNotices, DownloadState, Downloads,
+};
 use crate::history::{self, History};
 
 /// Liste de domaines de tracking / publicité bloqués (extrait — Phase 0).
@@ -84,6 +86,7 @@ wrap_client! {
         view_size: ViewSize,
         history: History,
         downloads: Downloads,
+        notices: DownloadNotices,
     }
 
     impl Client {
@@ -108,7 +111,10 @@ wrap_client! {
         }
 
         fn download_handler(&self) -> Option<DownloadHandler> {
-            Some(FaradayDownloadHandler::new(self.downloads.clone()))
+            Some(FaradayDownloadHandler::new(
+                self.downloads.clone(),
+                self.notices.clone(),
+            ))
         }
     }
 }
@@ -121,6 +127,7 @@ fn userfree_to_string(raw: &CefStringUserfree) -> String {
 wrap_download_handler! {
     struct FaradayDownloadHandler {
         downloads: Downloads,
+        notices: DownloadNotices,
     }
 
     impl DownloadHandler {
@@ -185,6 +192,13 @@ wrap_download_handler! {
                 );
             }
 
+            // Notifie l'UI : le téléchargement démarre.
+            downloads::notify(
+                &mut self.notices.lock().unwrap(),
+                &safe,
+                DownloadNoticeKind::Started,
+            );
+
             let path_str = path.to_string_lossy().to_string();
             let full = CefString::from(path_str.as_str());
             cb.cont(Some(&full), 0);
@@ -220,6 +234,7 @@ wrap_download_handler! {
             // Récupère l'état existant (sans garder d'emprunt sur la liste).
             let (mut url, mut name, mut path, mut cancel) =
                 (String::new(), String::new(), String::new(), false);
+            let mut prev: Option<DownloadState> = None;
             {
                 let mut list = self.downloads.lock().unwrap();
                 if let Some(e) = list.iter_mut().find(|e| e.id == id) {
@@ -227,6 +242,7 @@ wrap_download_handler! {
                     name = e.name.clone();
                     path = e.path.clone();
                     cancel = e.cancel_requested;
+                    prev = Some(e.state);
                 }
             }
 
@@ -241,6 +257,7 @@ wrap_download_handler! {
             if !full_path.is_empty() {
                 path = full_path;
             }
+            let notice_name = name.clone();
 
             {
                 let mut list = self.downloads.lock().unwrap();
@@ -261,6 +278,32 @@ wrap_download_handler! {
                 );
             }
 
+            // Notifications de fin (terminé / annulé / interrompu).
+            let mut notified_end = false;
+            let notice_kind = if prev.is_none()
+                && matches!(state, DownloadState::Starting | DownloadState::InProgress)
+            {
+                Some(DownloadNoticeKind::Started)
+            } else if prev.is_some() && prev != Some(state) {
+                match state {
+                    DownloadState::Complete => Some(DownloadNoticeKind::Complete),
+                    DownloadState::Cancelled => Some(DownloadNoticeKind::Cancelled),
+                    DownloadState::Interrupted => Some(DownloadNoticeKind::Interrupted),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            if let Some(kind) = notice_kind {
+                downloads::notify(&mut self.notices.lock().unwrap(), &notice_name, kind);
+                notified_end = matches!(
+                    kind,
+                    DownloadNoticeKind::Complete
+                        | DownloadNoticeKind::Cancelled
+                        | DownloadNoticeKind::Interrupted
+                );
+            }
+
             // Annulation demandée par l'UI : on exécute le callback ici.
             if cancel {
                 if let Some(cb) = callback {
@@ -269,6 +312,13 @@ wrap_download_handler! {
                 let mut list = self.downloads.lock().unwrap();
                 if let Some(e) = list.iter_mut().find(|e| e.id == id) {
                     e.state = DownloadState::Cancelled;
+                }
+                if !notified_end {
+                    downloads::notify(
+                        &mut self.notices.lock().unwrap(),
+                        &notice_name,
+                        DownloadNoticeKind::Cancelled,
+                    );
                 }
             }
         }

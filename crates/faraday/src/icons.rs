@@ -29,6 +29,10 @@ pub const TRASH: &str = "\u{E4A6}";
 pub const DOWNLOAD: &str = "\u{E20A}";
 /// Ouvrir un dossier.
 pub const FOLDER_OPEN: &str = "\u{E256}";
+/// Validation / succès.
+pub const CHECK: &str = "\u{E182}";
+/// Avertissement.
+pub const WARNING: &str = "\u{E4E0}";
 /// Globe (web générique).
 pub const GLOBE: &str = "\u{E288}";
 /// Article / document.

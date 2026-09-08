@@ -48,6 +48,36 @@ pub struct DownloadEntry {
 /// Collection partagée de téléchargements (thread-safe).
 pub type Downloads = Arc<Mutex<Vec<DownloadEntry>>>;
 
+/// Événement de notification d'un téléchargement (démarré/terminé/...).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DownloadNoticeKind {
+    Started,
+    Complete,
+    Cancelled,
+    Interrupted,
+}
+
+/// Notification envoyée par le handler CEF vers l'UI.
+#[derive(Clone)]
+pub struct DownloadNotice {
+    pub name: String,
+    pub kind: DownloadNoticeKind,
+}
+
+/// File de notifications à afficher (consommée par l'UI egui).
+pub type DownloadNotices = Arc<Mutex<Vec<DownloadNotice>>>;
+
+/// Ajoute une notification (avec une taille max pour éviter l'accumulation).
+pub fn notify(list: &mut Vec<DownloadNotice>, name: &str, kind: DownloadNoticeKind) {
+    list.push(DownloadNotice {
+        name: name.to_string(),
+        kind,
+    });
+    if list.len() > 40 {
+        list.remove(0);
+    }
+}
+
 /// Répertoire de téléchargement par défaut : `%USERPROFILE%\Downloads`.
 pub fn downloads_dir() -> PathBuf {
     let user = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());

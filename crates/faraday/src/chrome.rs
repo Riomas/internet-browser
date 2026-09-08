@@ -3,10 +3,13 @@
 
 use eframe::egui;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use cef::*;
 
-use crate::downloads::{DownloadEntry, DownloadState, Downloads};
+use crate::downloads::{
+    DownloadEntry, DownloadNotice, DownloadNoticeKind, DownloadNotices, DownloadState, Downloads,
+};
 use crate::handler::{FaradayClient, FaradayHandler, RenderBuffer, ViewSize};
 use crate::history::{History, HistoryEntry};
 use crate::icons;
@@ -178,6 +181,17 @@ pub struct Tab {
     texture: Option<egui::TextureHandle>,
 }
 
+/// Une notification temporaire (toast) affichée en haut à droite.
+#[derive(Clone)]
+struct Toast {
+    title: &'static str,
+    detail: String,
+    icon: &'static str,
+    color: egui::Color32,
+    start: Instant,
+    life: f32,
+}
+
 pub struct FaradayChrome {
     /// Taille de la zone de rendu (partagée par tous les onglets).
     view_size: ViewSize,
@@ -191,6 +205,10 @@ pub struct FaradayChrome {
     history: History,
     /// Téléchargements partagés (remplis par le DownloadHandler CEF).
     downloads: Downloads,
+    /// Notifications de téléchargement en attente d'affichage.
+    notices: DownloadNotices,
+    /// Toasts actuellement visibles.
+    toasts: Vec<Toast>,
     /// La fenêtre « Historique » est ouverte ?
     show_history: bool,
     /// La fenêtre « Téléchargements » est ouverte ?
@@ -213,6 +231,7 @@ impl FaradayChrome {
         let history: History = Arc::new(Mutex::new(session_data.history));
         let search_engine = PrivacyConfig::load().default_search_engine;
         let downloads: Downloads = Arc::new(Mutex::new(Vec::new()));
+        let notices: DownloadNotices = Arc::new(Mutex::new(Vec::new()));
 
         let mut tabs: Vec<Tab> = session_data
             .tabs
@@ -244,6 +263,8 @@ impl FaradayChrome {
             search_engine,
             history,
             downloads,
+            notices,
+            toasts: Vec::new(),
             show_history: false,
             show_downloads: false,
             ntp_query: String::new(),
@@ -290,6 +311,7 @@ impl FaradayChrome {
             self.view_size.clone(),
             self.history.clone(),
             self.downloads.clone(),
+            self.notices.clone(),
         );
         let settings = BrowserSettings {
             windowless_frame_rate: 60,
@@ -972,6 +994,116 @@ impl FaradayChrome {
         }
     }
 
+    /// Convertit une notification de téléchargement en toast affiché.
+    fn push_toast(&mut self, notice: DownloadNotice) {
+        let (title, icon, color) = match notice.kind {
+            DownloadNoticeKind::Started => (
+                "Téléchargement démarré",
+                icons::DOWNLOAD,
+                egui::Color32::from_rgb(88, 166, 255),
+            ),
+            DownloadNoticeKind::Complete => (
+                "Téléchargement terminé",
+                icons::CHECK,
+                egui::Color32::from_rgb(52, 199, 89),
+            ),
+            DownloadNoticeKind::Cancelled => (
+                "Téléchargement annulé",
+                icons::X,
+                egui::Color32::from_rgb(200, 200, 210),
+            ),
+            DownloadNoticeKind::Interrupted => (
+                "Téléchargement interrompu",
+                icons::WARNING,
+                egui::Color32::from_rgb(255, 159, 10),
+            ),
+        };
+        self.toasts.push(Toast {
+            title,
+            detail: notice.name,
+            icon,
+            color,
+            start: Instant::now(),
+            life: 5.0,
+        });
+        if self.toasts.len() > 6 {
+            self.toasts.remove(0);
+        }
+    }
+
+    /// Consomme les notifications et dessine les toasts (haut à droite).
+    fn update_toasts(&mut self, ctx: &egui::Context) {
+        // Vide la file de notifications partagée.
+        let pending: Vec<DownloadNotice> = {
+            let mut queue = self.notices.lock().unwrap();
+            queue.drain(..).collect()
+        };
+        for n in pending {
+            self.push_toast(n);
+        }
+
+        // Retire les toasts expirés.
+        let now = Instant::now();
+        self.toasts
+            .retain(|t| now.duration_since(t.start).as_secs_f32() < t.life);
+        if self.toasts.is_empty() {
+            return;
+        }
+
+        let toasts = self.toasts.clone();
+        egui::Area::new(egui::Id::new("faraday_toasts"))
+            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-14.0, 12.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                ui.with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
+                    for t in &toasts {
+                        let age = now.duration_since(t.start).as_secs_f32();
+                        let alpha = (1.0 - (age / t.life) * 0.75).clamp(0.25, 1.0);
+                        let bg = egui::Color32::from_rgba_unmultiplied(
+                            32,
+                            36,
+                            44,
+                            (245.0 * alpha) as u8,
+                        );
+                        let border = egui::Color32::from_rgba_unmultiplied(
+                            255,
+                            255,
+                            255,
+                            (24.0 * alpha) as u8,
+                        );
+                        egui::Frame::new()
+                            .fill(bg)
+                            .stroke(egui::Stroke::new(1.0_f32, border))
+                            .corner_radius(10.0)
+                            .inner_margin(egui::Margin::symmetric(12, 10))
+                            .show(ui, |ui| {
+                                ui.set_max_width(330.0);
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(t.icon)
+                                            .size(20.0)
+                                            .color(t.color),
+                                    );
+                                    ui.vertical(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(t.title)
+                                                .size(13.0)
+                                                .strong(),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(&t.detail)
+                                                .size(11.5)
+                                                .color(egui::Color32::from_gray(165)),
+                                        );
+                                    });
+                                });
+                            });
+                        ui.add_space(8.0);
+                    }
+                });
+            });
+    }
+
     /// Dessine la barre d'onglets + boutons nouveau/fermer.
     fn tab_strip(&mut self, ui: &mut egui::Ui) {
         let mut to_close: Option<usize> = None;
@@ -1164,14 +1296,37 @@ impl eframe::App for FaradayChrome {
                     ui.separator();
                     ui.add_space(4.0);
 
-                    // Téléchargements (fenêtre flottante).
-                    let dl = ui.add(
-                        egui::Button::new(
-                            egui::RichText::new(icons::DOWNLOAD).size(18.0),
-                        )
-                        .min_size(egui::vec2(30.0, 30.0)),
-                    );
-                    if dl.on_hover_text("Téléchargements (Ctrl+J)").clicked() {
+                    // Téléchargements (fenêtre flottante) + indicateur d'activité.
+                    let (dl_active, dl_total) = {
+                        let list = self.downloads.lock().unwrap();
+                        let active = list
+                            .iter()
+                            .filter(|e| {
+                                matches!(
+                                    e.state,
+                                    DownloadState::Starting | DownloadState::InProgress
+                                )
+                            })
+                            .count();
+                        (active, list.len())
+                    };
+                    let mut dl_btn = egui::Button::new(
+                        egui::RichText::new(icons::DOWNLOAD).size(18.0),
+                    )
+                    .min_size(egui::vec2(30.0, 30.0));
+                    if dl_active > 0 {
+                        dl_btn = dl_btn
+                            .fill(egui::Color32::from_rgba_unmultiplied(88, 166, 255, 45));
+                    }
+                    let dl = ui.add(dl_btn);
+                    let dl_tip = if dl_active > 0 {
+                        format!("Téléchargements (Ctrl+J) — {dl_active} en cours")
+                    } else if dl_total > 0 {
+                        format!("Téléchargements (Ctrl+J) — {dl_total} élément(s)")
+                    } else {
+                        "Téléchargements (Ctrl+J)".to_string()
+                    };
+                    if dl.on_hover_text(dl_tip).clicked() {
                         self.show_downloads = !self.show_downloads;
                     }
 
@@ -1260,6 +1415,9 @@ impl eframe::App for FaradayChrome {
         // Fenêtres flottantes (historique, téléchargements) par-dessus la page.
         self.history_window(ctx);
         self.downloads_window(ctx);
+
+        // Notifications toast des téléchargements.
+        self.update_toasts(ctx);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
