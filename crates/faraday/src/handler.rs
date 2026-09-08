@@ -7,6 +7,8 @@
 use cef::*;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
+use crate::history::{self, History};
+
 /// Liste de domaines de tracking / publicité bloqués (extrait — Phase 0).
 /// Sera remplacée par une vraie liste (EasyList + anti-track) en Phase 2.
 const TRACKER_DOMAINS: &[&str] = &[
@@ -79,11 +81,12 @@ wrap_client! {
         inner: Arc<Mutex<FaradayHandler>>,
         buffer: Arc<Mutex<RenderBuffer>>,
         view_size: ViewSize,
+        history: History,
     }
 
     impl Client {
         fn display_handler(&self) -> Option<DisplayHandler> {
-            Some(FaradayDisplayHandler::new(self.inner.clone()))
+            Some(FaradayDisplayHandler::new(self.inner.clone(), self.history.clone()))
         }
 
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
@@ -107,12 +110,29 @@ wrap_client! {
 wrap_display_handler! {
     struct FaradayDisplayHandler {
         inner: Arc<Mutex<FaradayHandler>>,
+        history: History,
     }
 
     impl DisplayHandler {
         fn on_title_change(&self, browser: Option<&mut Browser>, title: Option<&CefString>) {
-            // Défini plus tard (titre d'onglet, Phase 1).
+            // Défini plus tard (titre d'onglet).
             let _ = (browser, title);
+        }
+
+        fn on_address_change(
+            &self,
+            _browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            url: Option<&CefString>,
+        ) {
+            // N'enregistre que les navigations de la frame principale.
+            let is_main = frame.map(|f| f.is_main() == 1).unwrap_or(false);
+            if !is_main {
+                return;
+            }
+            if let Some(url) = url {
+                history::push(&self.history, &url.to_string());
+            }
         }
     }
 }

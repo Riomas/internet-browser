@@ -12,8 +12,10 @@
 mod app;
 mod chrome;
 mod handler;
+mod history;
 mod icons;
 mod privacy;
+mod session;
 mod win;
 
 use cef::*;

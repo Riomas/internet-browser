@@ -1304,6 +1304,7 @@ dependencies = [
  "cef",
  "eframe",
  "serde",
+ "serde_json",
  "toml 0.8.23",
  "windows-sys 0.61.2",
  "winres",

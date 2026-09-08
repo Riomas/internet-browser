@@ -7,8 +7,10 @@ use std::sync::{Arc, Mutex};
 use cef::*;
 
 use crate::handler::{FaradayClient, FaradayHandler, RenderBuffer, ViewSize};
+use crate::history::{History, HistoryEntry};
 use crate::icons;
 use crate::privacy::PrivacyConfig;
+use crate::session;
 
 // --- Transformation clavier / souris ---
 const FLAG_SHIFT: u32 = 1 << 1;
@@ -96,6 +98,65 @@ fn hostname(url: &str) -> String {
     }
 }
 
+/// Un lien rapide proposé sur la page de nouvel onglet.
+struct QuickLink {
+    label: &'static str,
+    url: &'static str,
+    icon: &'static str,
+    color: egui::Color32,
+}
+
+/// Raccourcis par défaut de la page d'accueil.
+const QUICK_LINKS: &[QuickLink] = &[
+    QuickLink { label: "DuckDuckGo", url: "https://duckduckgo.com", icon: icons::GLOBE, color: egui::Color32::from_rgb(222, 88, 51) },
+    QuickLink { label: "Wikipedia", url: "https://fr.wikipedia.org", icon: icons::ARTICLE, color: egui::Color32::from_rgb(84, 89, 93) },
+    QuickLink { label: "GitHub", url: "https://github.com", icon: icons::GITHUB_LOGO, color: egui::Color32::from_rgb(110, 84, 148) },
+    QuickLink { label: "EFF", url: "https://www.eff.org", icon: icons::CERTIFICATE, color: egui::Color32::from_rgb(23, 23, 23) },
+    QuickLink { label: "YouTube", url: "https://www.youtube.com", icon: icons::VIDEO, color: egui::Color32::from_rgb(255, 0, 0) },
+    QuickLink { label: "Actualités", url: "https://www.lemonde.fr", icon: icons::NEWSPAPER, color: egui::Color32::from_rgb(58, 98, 181) },
+    QuickLink { label: "Internet Archive", url: "https://archive.org", icon: icons::BOOKMARK, color: egui::Color32::from_rgb(90, 74, 140) },
+    QuickLink { label: "Framasoft", url: "https://framasoft.org", icon: icons::FINGERPRINT, color: egui::Color32::from_rgb(51, 153, 255) },
+];
+
+/// Vrai si la saisie ressemble à une URL (sinon → moteur de recherche).
+fn looks_like_url(input: &str) -> bool {
+    let s = input.trim();
+    s.contains("://") || (s.contains('.') && !s.chars().any(char::is_whitespace))
+}
+
+/// Encode une requête pour une URL de recherche (percent-encoding minimal).
+fn url_encode(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for b in input.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Construit l'URL cible depuis une saisie, avec le moteur de recherche par
+/// défaut (`search_engine`) comme base pour les requêtes.
+fn resolve_input(input: &str, search_engine: &str) -> String {
+    let s = input.trim();
+    if s.is_empty() {
+        return String::new();
+    }
+    if looks_like_url(s) {
+        if s.contains("://") {
+            s.to_string()
+        } else {
+            format!("https://{s}")
+        }
+    } else {
+        let base = search_engine.trim_end_matches('/');
+        format!("{base}/?q={}", url_encode(s))
+    }
+}
+
 /// Un onglet : son navigateur CEF (OSR), son tampon de pixels et sa texture egui.
 pub struct Tab {
     url: String,
@@ -111,6 +172,14 @@ pub struct FaradayChrome {
     active: usize,
     /// Contenu de la barre d'adresse (onglet actif).
     url: String,
+    /// Moteur de recherche par défaut (base des requêtes de la barre/NTP).
+    search_engine: String,
+    /// Historique de navigation partagé (rempli par les handlers CEF).
+    history: History,
+    /// La fenêtre « Historique » est ouverte ?
+    show_history: bool,
+    /// Requête saisie dans la barre de la page de nouvel onglet.
+    ntp_query: String,
     left_down: bool,
     /// Le focus clavier est sur la page web (vs barre d'adresse).
     page_focused: bool,
@@ -122,23 +191,65 @@ impl FaradayChrome {
         // Enregistrer les polices d'icônes Phosphor (libres MIT)
         icons::setup_custom_fonts(&cc.egui_ctx);
 
-        let config = PrivacyConfig::load();
-        let url = config.default_search_engine;
-        let tab = Tab {
-            url: url.clone(),
-            buffer: Arc::new(Mutex::new(RenderBuffer::new())),
-            browser: None,
-            texture: None,
-        };
+        // Restaure la session précédente (onglets + historique).
+        let session_data = session::load();
+        let history: History = Arc::new(Mutex::new(session_data.history));
+        let search_engine = PrivacyConfig::load().default_search_engine;
+
+        let mut tabs: Vec<Tab> = session_data
+            .tabs
+            .iter()
+            .map(|url| Tab {
+                url: url.clone(),
+                buffer: Arc::new(Mutex::new(RenderBuffer::new())),
+                browser: None,
+                texture: None,
+            })
+            .collect();
+        if tabs.is_empty() {
+            // Première utilisation : un nouvel onglet (page d'accueil).
+            tabs.push(Tab {
+                url: String::new(),
+                buffer: Arc::new(Mutex::new(RenderBuffer::new())),
+                browser: None,
+                texture: None,
+            });
+        }
+        let active = session_data.active.min(tabs.len() - 1);
+        let url = tabs[active].url.clone();
+
         Self {
             view_size,
-            tabs: vec![tab],
-            active: 0,
+            tabs,
+            active,
             url,
+            search_engine,
+            history,
+            show_history: false,
+            ntp_query: String::new(),
             left_down: false,
             page_focused: false,
             address_bar_id: None,
         }
+    }
+
+    /// L'onglet actif n'a pas encore de navigateur CEF → page de nouvel onglet.
+    fn active_is_new_tab(&self) -> bool {
+        self.tabs
+            .get(self.active)
+            .map(|t| t.browser.is_none())
+            .unwrap_or(true)
+    }
+
+    /// Navigue vers `target` dans l'onglet actif (crée le navigateur si NTP).
+    fn navigate_to(&mut self, target: &str) {
+        let resolved = resolve_input(target, &self.search_engine);
+        if resolved.is_empty() {
+            return;
+        }
+        self.url = resolved.clone();
+        self.navigate();
+        self.page_focused = true;
     }
 
     /// Crée le navigateur OSR de l'onglet `idx` (une seule fois par onglet).
@@ -146,13 +257,24 @@ impl FaradayChrome {
         if idx >= self.tabs.len() || self.tabs[idx].browser.is_some() {
             return;
         }
+        let url = self.tabs[idx].url.clone();
+        // Un onglet sans URL (page d'accueil) n'est matérialisé qu'à la
+        // première navigation, sinon il resterait sur une page vide.
+        if url.is_empty() {
+            return;
+        }
         let buffer = self.tabs[idx].buffer.clone();
-        let client = FaradayClient::new(FaradayHandler::new(), buffer, self.view_size.clone());
+        let client = FaradayClient::new(
+            FaradayHandler::new(),
+            buffer,
+            self.view_size.clone(),
+            self.history.clone(),
+        );
         let settings = BrowserSettings {
             windowless_frame_rate: 60,
             ..Default::default()
         };
-        let url = CefString::from(self.tabs[idx].url.as_str());
+        let url = CefString::from(url.as_str());
         let window_info = WindowInfo {
             windowless_rendering_enabled: 1,
             ..Default::default()
@@ -196,7 +318,8 @@ impl FaradayChrome {
         self.active = self.tabs.len() - 1;
         self.make_browser_for(self.active);
         self.url = self.tabs[self.active].url.clone();
-        self.page_focused = true;
+        // Un onglet vide (page d'accueil) n'a pas de focus navigateur.
+        self.page_focused = !self.url.is_empty();
     }
 
     /// Rend l'onglet `idx` actif (masque l'ancien, montre le nouveau).
@@ -220,7 +343,7 @@ impl FaradayChrome {
             }
         }
         self.url = self.tabs[idx].url.clone();
-        self.page_focused = true;
+        self.page_focused = !self.url.is_empty();
     }
 
     /// Ferme l'onglet `idx` (jamais le dernier) et sélectionne un voisin.
@@ -250,6 +373,17 @@ impl FaradayChrome {
             self.url = self.tabs[self.active].url.clone();
         } else if idx < self.active {
             self.active -= 1;
+        }
+    }
+
+    /// Ferme tous les navigateurs CEF (appelé à la fermeture propre de l'app).
+    fn close_all_browsers(&mut self) {
+        for tab in &mut self.tabs {
+            if let Some(browser) = tab.browser.take() {
+                if let Some(host) = browser.host() {
+                    host.close_browser(1);
+                }
+            }
         }
     }
 
@@ -295,8 +429,16 @@ impl FaradayChrome {
     }
 
     fn navigate(&mut self) {
-        let url = self.url.clone();
+        let url = self.url.trim().to_string();
+        if url.is_empty() {
+            return;
+        }
         self.tabs[self.active].url = url.clone();
+        // Premier chargement d'un onglet « accueil » : on crée son navigateur.
+        if self.tabs[self.active].browser.is_none() {
+            self.make_browser_for(self.active);
+            return;
+        }
         let _ = self.with_browser(|b| {
             if let Some(frame) = b.main_frame() {
                 frame.load_url(Some(&CefString::from(url.as_str())));
@@ -460,6 +602,208 @@ impl FaradayChrome {
         }
     }
 
+    /// Page de nouvel onglet : fond, recherche et raccourcis (rendu egui).
+    fn new_tab_page(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
+        let painter = ui.painter();
+        painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(24, 26, 32));
+
+        // Bandeau d'accent discret en haut (rappel de la marque).
+        let accent = egui::Color32::from_rgb(52, 199, 89);
+        painter.rect_filled(
+            egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.min.y + 3.0)),
+            0.0,
+            accent,
+        );
+
+        let mut go: Option<String> = None;
+        let engine_host = hostname(&self.search_engine);
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
+            ui.add_space((rect.height() * 0.20).max(32.0));
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    egui::RichText::new("Faraday")
+                        .size(40.0)
+                        .strong()
+                        .color(egui::Color32::from_rgb(235, 235, 240)),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new("Votre navigation privée, sans traqueurs")
+                        .size(14.0)
+                        .color(egui::Color32::from_gray(150)),
+                );
+                ui.add_space(24.0);
+
+                // Barre de recherche / adresse.
+                let sw = (rect.width() * 0.55).clamp(260.0, 640.0);
+                let search = ui.add_sized(
+                    [sw, 38.0],
+                    egui::TextEdit::singleline(&mut self.ntp_query)
+                        .font(egui::TextStyle::Body)
+                        .margin(egui::Margin::symmetric(16, 9))
+                        .hint_text("Rechercher sur le web ou saisir une adresse"),
+                );
+                let submit =
+                    search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if submit && !self.ntp_query.trim().is_empty() {
+                    go = Some(self.ntp_query.clone());
+                }
+
+                ui.add_space(34.0);
+
+                // Raccourcis rapides.
+                let label_hint = egui::RichText::new("Raccourcis")
+                    .size(11.0)
+                    .color(egui::Color32::from_gray(130));
+                ui.label(label_hint);
+                ui.add_space(10.0);
+
+                egui::ScrollArea::horizontal().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        for link in QUICK_LINKS {
+                            let tile = ui.vertical(|ui| {
+                                let b = ui.add(
+                                    egui::Button::new(
+                                        egui::RichText::new(link.icon).size(28.0).color(link.color),
+                                    )
+                                    .min_size(egui::vec2(64.0, 64.0)),
+                                );
+                                ui.label(
+                                    egui::RichText::new(link.label)
+                                        .size(11.0)
+                                        .color(egui::Color32::from_gray(170)),
+                                );
+                                b
+                            });
+                            if tile.inner.clicked() {
+                                go = Some(link.url.to_string());
+                            }
+                            ui.add_space(8.0);
+                        }
+                    });
+                });
+
+                ui.add_space(28.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Recherche par défaut : {engine_host} — aucune donnée partagée"
+                    ))
+                    .size(11.0)
+                    .color(egui::Color32::from_gray(110)),
+                );
+            });
+        });
+
+        if let Some(q) = go {
+            self.navigate_to(&q);
+            self.ntp_query.clear();
+        }
+    }
+
+    /// Fenêtre flottante « Historique » (liste des visites + effacer).
+    fn history_window(&mut self, ctx: &egui::Context) {
+        if !self.show_history {
+            return;
+        }
+        let mut open = true;
+        let mut go: Option<String> = None;
+        let mut clear = false;
+
+        egui::Window::new("Historique")
+            .open(&mut open)
+            .default_width(460.0)
+            .default_height(400.0)
+            .collapsible(false)
+            .resizable(true)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.strong("Historique de navigation");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add(
+                                egui::Button::new(egui::RichText::new(icons::TRASH).size(16.0))
+                                    .frame(false),
+                            )
+                            .on_hover_text("Effacer l'historique")
+                            .clicked()
+                        {
+                            clear = true;
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(2.0);
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let entries: Vec<HistoryEntry> = self.history.lock().unwrap().clone();
+                    if entries.is_empty() {
+                        ui.add_space(16.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                egui::RichText::new("Aucune visite enregistrée pour l'instant.")
+                                    .color(egui::Color32::from_gray(150)),
+                            );
+                        });
+                        return;
+                    }
+                    for e in &entries {
+                        let row_h = 42.0;
+                        let (rrect, resp) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), row_h),
+                            egui::Sense::click(),
+                        );
+                        if ui.is_rect_visible(rrect) {
+                            let p = ui.painter();
+                            if resp.hovered() {
+                                p.rect_filled(
+                                    rrect,
+                                    4.0,
+                                    egui::Color32::from_gray(45),
+                                );
+                            }
+                            let cy = rrect.center().y;
+                            p.text(
+                                egui::pos2(rrect.left() + 18.0, cy),
+                                egui::Align2::LEFT_CENTER,
+                                icons::CLOCK_COUNTER_CLOCKWISE,
+                                egui::FontId::proportional(14.0),
+                                egui::Color32::from_gray(160),
+                            );
+                            p.text(
+                                egui::pos2(rrect.left() + 42.0, rrect.top() + 8.0),
+                                egui::Align2::LEFT_TOP,
+                                &e.title,
+                                egui::FontId::proportional(13.0),
+                                ui.visuals().text_color(),
+                            );
+                            p.text(
+                                egui::pos2(rrect.left() + 42.0, rrect.top() + 24.0),
+                                egui::Align2::LEFT_TOP,
+                                &e.url,
+                                egui::FontId::proportional(11.0),
+                                egui::Color32::from_gray(140),
+                            );
+                        }
+                        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            go = Some(e.url.clone());
+                        }
+                    }
+                });
+            });
+
+        if clear {
+            self.history.lock().unwrap().clear();
+        }
+        if let Some(url) = go {
+            self.show_history = false;
+            self.navigate_to(&url);
+        }
+        if !open {
+            self.show_history = false;
+        }
+    }
+
     /// Dessine la barre d'onglets + boutons nouveau/fermer.
     fn tab_strip(&mut self, ui: &mut egui::Ui) {
         let mut to_close: Option<usize> = None;
@@ -472,7 +816,12 @@ impl FaradayChrome {
             let mut i = 0;
             while i < self.tabs.len() {
                 let active = i == self.active;
-                let title = hostname(&self.tabs[i].url);
+                let raw = &self.tabs[i].url;
+                let title = if raw.is_empty() {
+                    "Nouvel onglet".to_string()
+                } else {
+                    hostname(raw)
+                };
                 let label = egui::RichText::new(title).size(13.0);
                 let selected = ui.selectable_label(active, label);
                 if selected.clicked() {
@@ -481,9 +830,11 @@ impl FaradayChrome {
 
                 // Bouton de fermeture (croix) — discret sur l'onglet survolé.
                 let close = ui.add(
-                    egui::Button::new(egui::RichText::new("x").size(11.0).color(
-                        egui::Color32::from_gray(160),
-                    ))
+                    egui::Button::new(
+                        egui::RichText::new(icons::X)
+                            .size(10.0)
+                            .color(egui::Color32::from_gray(160)),
+                    )
                     .min_size(egui::vec2(16.0, 16.0))
                     .frame(false),
                 );
@@ -499,10 +850,12 @@ impl FaradayChrome {
 
             // Nouvel onglet (+)
             let plus = ui.add(
-                egui::Button::new(egui::RichText::new("+").size(16.0).strong())
-                    .min_size(egui::vec2(22.0, 22.0)),
+                egui::Button::new(
+                    egui::RichText::new(icons::PLUS).size(14.0).strong(),
+                )
+                .min_size(egui::vec2(22.0, 22.0)),
             );
-            if plus.on_hover_text("Nouvel onglet").clicked() {
+            if plus.on_hover_text("Nouvel onglet (Ctrl+T)").clicked() {
                 new_tab = true;
             }
         });
@@ -515,8 +868,8 @@ impl FaradayChrome {
             self.set_active(i);
         }
         if new_tab {
-            let config = PrivacyConfig::load();
-            self.open_tab(config.default_search_engine);
+            // Nouvel onglet = page d'accueil Faraday (vide → egui).
+            self.open_tab(String::new());
         }
     }
 }
@@ -527,6 +880,30 @@ impl eframe::App for FaradayChrome {
         cef::do_message_loop_work();
         // Redessiner en continu pour recevoir les on_paint de CEF.
         ctx.request_repaint();
+
+        // Raccourcis clavier du chrome (avant tout envoi à la page).
+        {
+            let (t, l, h) = ctx.input(|i| {
+                let c = i.modifiers.ctrl;
+                (
+                    c && i.key_pressed(egui::Key::T),
+                    c && i.key_pressed(egui::Key::L),
+                    c && i.key_pressed(egui::Key::H),
+                )
+            });
+            if t {
+                self.open_tab(String::new());
+            }
+            if h {
+                self.show_history = !self.show_history;
+            }
+            if l {
+                if let Some(id) = self.address_bar_id {
+                    ctx.memory_mut(|m| m.request_focus(id));
+                }
+                self.page_focused = false;
+            }
+        }
 
         self.make_browser_for(self.active);
         self.upload_active_texture(ctx);
@@ -571,16 +948,17 @@ impl eframe::App for FaradayChrome {
                     if nav(ui, icons::ARROWS_CLOCKWISE, "Recharger") {
                         self.reload();
                     }
-                    if nav(ui, icons::HOUSE, "Accueil DuckDuckGo") {
-                        self.url = "https://duckduckgo.com".to_string();
+                    let home = self.search_engine.clone();
+                    if nav(ui, icons::HOUSE, "Aller au moteur de recherche") {
+                        self.url = home;
                         self.navigate();
                     }
 
                     ui.add_space(4.0);
 
                     // Barre d'adresse : occupe l'espace restant après les
-                    // boutons fixes de droite (Aller + bouclier).
-                    let addr_w = (ui.available_width() - 120.0).max(80.0);
+                    // boutons fixes de droite (Historique + Aller + bouclier).
+                    let addr_w = (ui.available_width() - 165.0).max(80.0);
                     let addr = ui.add_sized(
                         [addr_w, 30.0],
                         egui::TextEdit::singleline(&mut self.url)
@@ -612,6 +990,19 @@ impl eframe::App for FaradayChrome {
 
                     ui.add_space(4.0);
                     ui.separator();
+                    ui.add_space(4.0);
+
+                    // Historique (fenêtre flottante).
+                    let hist = ui.add(
+                        egui::Button::new(
+                            egui::RichText::new(icons::CLOCK_COUNTER_CLOCKWISE).size(18.0),
+                        )
+                        .min_size(egui::vec2(30.0, 30.0)),
+                    );
+                    if hist.on_hover_text("Historique (Ctrl+H)").clicked() {
+                        self.show_history = !self.show_history;
+                    }
+
                     ui.add_space(4.0);
 
                     // Bouclier privacy compact (vert).
@@ -648,6 +1039,13 @@ impl eframe::App for FaradayChrome {
             let avail = ui.available_size();
             let (rect, response) = ui.allocate_exact_size(avail, egui::Sense::click_and_drag());
             self.sync_view_size(rect, ctx.pixels_per_point());
+
+            // Onglet sans navigateur (page d'accueil) → rendu egui.
+            if self.active_is_new_tab() {
+                self.new_tab_page(ui, rect);
+                return;
+            }
+
             // Cliquer sur la page lui donne le focus clavier.
             if response.is_pointer_button_down_on() {
                 self.page_focused = true;
@@ -673,6 +1071,30 @@ impl eframe::App for FaradayChrome {
             }
             self.forward_input(ctx, rect, &response);
         });
+
+        // Fenêtre flottante d'historique (par-dessus le contenu).
+        self.history_window(ctx);
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // Persistance : onglets ouverts, onglet actif et historique.
+        let data = session::SessionData {
+            active: self.active,
+            tabs: self.tabs.iter().map(|t| t.url.clone()).collect(),
+            history: self.history.lock().unwrap().clone(),
+        };
+        session::save(&data);
+
+        // Fermeture propre des navigateurs CEF avant `cef::shutdown()` :
+        // évite une sortie avec code 1 et des reliquats de processus au
+        // prochain démarrage. On pompe les messages CEF un court instant
+        // pour laisser les fermetures se terminer.
+        self.close_all_browsers();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
+        while std::time::Instant::now() < deadline {
+            cef::do_message_loop_work();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
     }
 }
 
