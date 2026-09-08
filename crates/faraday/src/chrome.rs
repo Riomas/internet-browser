@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use cef::*;
 
+use crate::blocklist;
 use crate::downloads::{
     DownloadEntry, DownloadNotice, DownloadNoticeKind, DownloadNotices, DownloadState, Downloads,
 };
@@ -1574,10 +1575,11 @@ impl eframe::App for FaradayChrome {
 
                     ui.add_space(4.0);
 
-                    // Bouclier privacy compact (vert).
+                    // Bouclier privacy : compteur de blocages en direct.
+                    let blocked = blocklist::blocked_count();
                     let shield = ui.add(
                         egui::Button::new(
-                            egui::RichText::new(format!("{} 0", icons::SHIELD_CHECK))
+                            egui::RichText::new(format!("{} {blocked}", icons::SHIELD_CHECK))
                                 .color(egui::Color32::from_rgb(52, 199, 89))
                                 .strong()
                                 .size(16.0),
@@ -1585,10 +1587,20 @@ impl eframe::App for FaradayChrome {
                         .min_size(egui::vec2(44.0, 30.0))
                         .fill(egui::Color32::from_rgba_unmultiplied(52, 199, 89, 25)),
                     );
-                    if shield
-                        .on_hover_text(
-                            "0 tracker bloqué - Faraday protège votre vie privée.\nCliquer : tester sur EFF Cover Your Tracks.",
+                    let tip = if blocked == 0 {
+                        "Aucune requête de tracking bloquée - Faraday protège votre vie privée."
+                            .to_string()
+                    } else {
+                        format!(
+                            "{blocked} requête{} de tracking bloquée{} - Faraday protège votre vie privée.",
+                            if blocked > 1 { "s" } else { "" },
+                            if blocked > 1 { "s" } else { "" }
                         )
+                    };
+                    if shield
+                        .on_hover_text(format!(
+                            "{tip}\nCliquer : tester sur EFF Cover Your Tracks."
+                        ))
                         .clicked()
                     {
                         self.url = "https://coveryourtracks.eff.org".to_string();

@@ -10,6 +10,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod blocklist;
 mod chrome;
 mod downloads;
 mod handler;

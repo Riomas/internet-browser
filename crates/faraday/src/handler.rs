@@ -1,29 +1,17 @@
 //! Client CEF : cycle de vie du navigateur + blocage réseau des trackers.
 //!
-//! Le `RequestHandler::on_before_resource_load` rejette les requêtes vers des
-//! domaines de tracking/publicité connus (liste simple en Phase 0 ; une vraie
-//! liste type EasyList sera intégrée en Phase 2).
+//! Le `ResourceRequestHandler::on_before_resource_load` refuse les requêtes
+//! vers les domaines listés dans `configs/blocklist.txt` (moteur Phase 2) et
+//! injecte l'en-tête Do-Not-Track (`DNT: 1`) sur chaque requête.
 
 use cef::*;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
+use crate::blocklist;
 use crate::downloads::{
     self, DownloadEntry, DownloadNoticeKind, DownloadNotices, DownloadState, Downloads,
 };
 use crate::history::{self, History};
-
-/// Liste de domaines de tracking / publicité bloqués (extrait — Phase 0).
-/// Sera remplacée par une vraie liste (EasyList + anti-track) en Phase 2.
-const TRACKER_DOMAINS: &[&str] = &[
-    "doubleclick.net",
-    "googletagmanager.com",
-    "google-analytics.com",
-    "facebook.net",
-    "scorecardresearch.com",
-];
-
-/// Domaines qui ne doivent **jamais** être bloqués (sites de confiance).
-const ALLOWED_DOMAINS: &[&str] = &["duckduckgo.com"];
 
 /// Tampon de pixels du rendu OSR d'un onglet (mode CEF windowless).
 pub struct RenderBuffer {
@@ -452,21 +440,27 @@ wrap_resource_request_handler! {
             request: Option<&mut Request>,
             _callback: Option<&mut Callback>,
         ) -> ReturnValue {
-            // Bloque les requêtes vers les domaines de tracking/publicité.
             let Some(req) = request else {
                 return ReturnValue::CONTINUE;
             };
-            let url = {
-                let raw = req.url();
-                CefStringUtf16::from(&raw).to_string().to_lowercase()
-            };
 
-            if TRACKER_DOMAINS.iter().any(|d| url.contains(d)) {
-                // Ne pas bloquer les domaines autorisés.
-                if !ALLOWED_DOMAINS.iter().any(|d| url.contains(d)) {
+            // Blocage des domaines de tracking/publicité (moteur Phase 2).
+            {
+                let url = {
+                    let raw = req.url();
+                    CefStringUtf16::from(&raw).to_string()
+                };
+                if blocklist::should_block(&url) {
+                    blocklist::incr_blocked();
                     return ReturnValue::CANCEL;
                 }
             }
+
+            // Do-Not-Track : en-tête envoyé à chaque requête.
+            let dnt_name = CefString::from("DNT");
+            let dnt_value = CefString::from("1");
+            req.set_header_by_name(Some(&dnt_name), Some(&dnt_value), 1);
+
             ReturnValue::CONTINUE
         }
     }

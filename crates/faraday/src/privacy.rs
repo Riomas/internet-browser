@@ -22,6 +22,10 @@ pub struct PrivacyConfig {
     pub disable_suggestions: bool,
     /// Désactive l'autofill personnel.
     pub disable_personal_autofill: bool,
+    /// Bloque les cookies tiers (les sites ne peuvent pas se suivre entre eux).
+    pub block_third_party_cookies: bool,
+    /// N'envoie aucun en-tête `Referer` (anti-suivi).
+    pub no_referrer: bool,
     /// Force le passage en HTTPS quand disponible.
     pub force_https: bool,
     /// Features Chromium à désactiver (prefetch, preconnect, etc.).
@@ -39,6 +43,8 @@ impl Default for PrivacyConfig {
             disable_sync: true,
             disable_suggestions: true,
             disable_personal_autofill: true,
+            block_third_party_cookies: true,
+            no_referrer: true,
             force_https: true,
             disable_features: vec![
                 "Preload".to_string(),
@@ -89,6 +95,12 @@ pub fn apply_privacy_switches(config: &PrivacyConfig, command_line: &mut Command
     }
     if config.disable_personal_autofill {
         command_line.append_switch(Some(&"--disable-personal-autofill".into()));
+    }
+    if config.block_third_party_cookies {
+        command_line.append_switch(Some(&"--block-third-party-cookies".into()));
+    }
+    if config.no_referrer {
+        command_line.append_switch(Some(&"--no-referrers".into()));
     }
     if config.force_https {
         command_line.append_switch(Some(&"--force-https".into()));

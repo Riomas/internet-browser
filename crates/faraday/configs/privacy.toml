@@ -10,6 +10,12 @@ disable_sync = true
 disable_suggestions = true
 disable_personal_autofill = true
 
+# Bloque les cookies tiers (un site ne peut pas te suivre sur d'autres sites).
+block_third_party_cookies = true
+
+# N'envoie aucun en-tête Referer.
+no_referrer = true
+
 # Force le passage en HTTPS quand disponible.
 force_https = true
 
