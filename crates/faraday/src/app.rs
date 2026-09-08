@@ -1,11 +1,8 @@
 //! Application CEF principale. C'est ici qu'on injecte les switches de
-//! confidentialité avant même que Chromium ne démarre, et qu'on crée le
-//! navigateur une fois le contexte initialisé.
+//! confidentialité avant même que Chromium ne démarre.
 
 use cef::*;
-use std::cell::RefCell;
 
-use crate::handler::{FaradayClient, FaradayHandler};
 use crate::privacy::{apply_privacy_switches, PrivacyConfig};
 
 wrap_app! {
@@ -24,42 +21,25 @@ wrap_app! {
 
             let config = PrivacyConfig::load();
             apply_privacy_switches(&config, command_line);
+
+            // Rendu logiciel : évite des DCHECK GPU sur les environnements
+            // sans adaptateur graphique stable (à réévaluer pour la perf).
+            command_line.append_switch(Some(&"--disable-gpu".into()));
         }
 
         fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {
-            Some(FaradayBrowserProcessHandler::new(RefCell::new(None)))
+            Some(FaradayBrowserProcessHandler::new())
         }
     }
 }
 
 wrap_browser_process_handler! {
-    struct FaradayBrowserProcessHandler {
-        client: RefCell<Option<Client>>,
-    }
+    struct FaradayBrowserProcessHandler;
 
     impl BrowserProcessHandler {
         fn on_context_initialized(&self) {
-            // Créer le client (cycle de vie + blocage trackers).
-            let client = FaradayClient::new(FaradayHandler::new());
-            *self.client.borrow_mut() = Some(client.clone());
-
-            let settings = BrowserSettings::default();
-
-            let config = PrivacyConfig::load();
-            let url = CefString::from(config.default_search_engine.as_str());
-
-            let window_info = crate::win::window_info();
-
-            // Crée le navigateur dans la fenêtre native.
-            let mut client_opt = self.client.borrow_mut();
-            browser_host_create_browser(
-                Some(&window_info),
-                client_opt.as_mut(),
-                Some(&url),
-                Some(&settings),
-                None,
-                None,
-            );
+            // Le navigateur OSR est créé par l'UI egui (chrome.rs) une fois
+            // que la boucle événementielle tourne.
         }
     }
 }

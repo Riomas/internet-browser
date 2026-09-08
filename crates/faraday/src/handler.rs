@@ -20,6 +20,22 @@ const TRACKER_DOMAINS: &[&str] = &[
 /// Domaines qui ne doivent **jamais** être bloqués (sites de confiance).
 const ALLOWED_DOMAINS: &[&str] = &["duckduckgo.com"];
 
+/// État partagé entre CEF (rendu OSR) et l'UI egui (chrome).
+pub struct SharedState {
+    pub buffer: Mutex<RenderBuffer>,
+    pub browser: Mutex<Option<Browser>>,
+    /// Taille de la zone de rendu en pixels logiques (largeur, hauteur).
+    pub view_size: Mutex<(usize, usize)>,
+}
+
+/// Tampon de pixels du rendu OSR (mode CEF windowless).
+pub struct RenderBuffer {
+    pub data: Vec<u8>,
+    pub width: usize,
+    pub height: usize,
+    pub dirty: bool,
+}
+
 static HANDLER: OnceLock<Weak<Mutex<FaradayHandler>>> = OnceLock::new();
 
 pub struct FaradayHandler {
@@ -55,6 +71,7 @@ impl FaradayHandler {
 wrap_client! {
     pub struct FaradayClient {
         inner: Arc<Mutex<FaradayHandler>>,
+        state: Arc<SharedState>,
     }
 
     impl Client {
@@ -72,6 +89,10 @@ wrap_client! {
 
         fn request_handler(&self) -> Option<RequestHandler> {
             Some(FaradayRequestHandler::new(self.inner.clone()))
+        }
+
+        fn render_handler(&self) -> Option<RenderHandler> {
+            Some(FaradayRenderHandler::new(self.state.clone()))
         }
     }
 }
@@ -177,6 +198,52 @@ wrap_resource_request_handler! {
                 }
             }
             ReturnValue::CONTINUE
+        }
+    }
+}
+
+wrap_render_handler! {
+    struct FaradayRenderHandler {
+        state: Arc<SharedState>,
+    }
+
+    impl RenderHandler {
+        fn view_rect(&self, _browser: Option<&mut Browser>, rect: Option<&mut Rect>) {
+            // Taille de la zone de rendu (doit être non nulle en OSR sinon
+            // CEF déclenche un DCHECK à la création du browser).
+            if let Some(rect) = rect {
+                let (w, h) = *self.state.view_size.lock().unwrap();
+                if w > 0 && h > 0 {
+                    rect.width = w as i32;
+                    rect.height = h as i32;
+                } else {
+                    rect.width = 1280;
+                    rect.height = 800;
+                }
+                rect.x = 0;
+                rect.y = 0;
+            }
+        }
+
+        fn on_paint(
+            &self,
+            _browser: Option<&mut Browser>,
+            _type_: PaintElementType,
+            _dirty_rects: Option<&[Rect]>,
+            buffer: *const u8,
+            width: ::std::os::raw::c_int,
+            height: ::std::os::raw::c_int,
+        ) {
+            let mut buf = self.state.buffer.lock().unwrap();
+            let size = (width * height * 4) as usize;
+            if size > 0 && !buffer.is_null() {
+                unsafe {
+                    buf.data = std::slice::from_raw_parts(buffer, size).to_vec();
+                }
+                buf.width = width as usize;
+                buf.height = height as usize;
+                buf.dirty = true;
+            }
         }
     }
 }

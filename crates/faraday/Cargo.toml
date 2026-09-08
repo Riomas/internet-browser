@@ -33,6 +33,8 @@ cef = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 toml = "0.8"
+# UI chrome + rendu OSR de la page
+eframe = "0.31"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { workspace = true }
