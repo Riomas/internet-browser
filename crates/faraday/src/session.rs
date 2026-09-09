@@ -14,6 +14,9 @@ pub struct SessionData {
     pub active: usize,
     /// URLs des onglets ouverts (dans l'ordre, une chaîne vide = nouvel onglet).
     pub tabs: Vec<String>,
+    /// Préférence de thème : 0 = Système, 1 = Sombre, 2 = Clair.
+    #[serde(default)]
+    pub theme: u8,
     /// Historique de navigation (le plus récent en premier).
     pub history: Vec<HistoryEntry>,
 }

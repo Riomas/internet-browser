@@ -174,6 +174,12 @@ fn format_speed(bytes_per_sec: i64) -> String {
     }
 }
 
+/// Interpole linéairement entre deux couleurs (pour les dégradés).
+fn color_lerp(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
+    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    egui::Color32::from_rgb(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()))
+}
+
 /// Un onglet : son navigateur CEF (OSR), son tampon de pixels et sa texture egui.
 pub struct Tab {
     url: String,
@@ -238,6 +244,8 @@ pub struct FaradayChrome {
     settings_open: bool,
     /// Copie de travail des réglages (Confidentialité, Général…).
     settings: PrivacyConfig,
+    /// Préférence de thème : 0 Système, 1 Sombre, 2 Clair.
+    theme_index: u8,
     /// Requête saisie dans la barre de la page de nouvel onglet.
     ntp_query: String,
     left_down: bool,
@@ -252,9 +260,17 @@ impl FaradayChrome {
     pub fn new(cc: &eframe::CreationContext<'_>, view_size: ViewSize) -> Self {
         // Enregistrer les polices d'icônes Phosphor (libres MIT)
         icons::setup_custom_fonts(&cc.egui_ctx);
-
         // Restaure la session précédente (onglets + historique).
         let session_data = session::load();
+        // Applique la préférence de thème (Système par défaut).
+        let theme_index = session_data.theme.min(2);
+        let theme_pref = match theme_index {
+            1 => egui::ThemePreference::Dark,
+            2 => egui::ThemePreference::Light,
+            _ => egui::ThemePreference::System,
+        };
+        cc.egui_ctx.set_theme(theme_pref);
+
         let history: History = Arc::new(Mutex::new(session_data.history));
         let config = PrivacyConfig::load();
         let search_engine = config.default_search_engine.clone();
@@ -299,6 +315,7 @@ impl FaradayChrome {
             show_downloads: false,
             settings_open: false,
             settings: config,
+            theme_index,
             ntp_query: String::new(),
             left_down: false,
             page_focused: false,
@@ -700,97 +717,298 @@ impl FaradayChrome {
         }
     }
 
-    /// Page de nouvel onglet : fond, recherche et raccourcis (rendu egui).
+    /// Page de nouvel onglet (accueil Faraday) : rendu egui moderne qui suit
+    /// le thème du navigateur / système (sombre ou clair).
     fn new_tab_page(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
-        let painter = ui.painter();
-        painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(24, 26, 32));
-
-        // Bandeau d'accent discret en haut (rappel de la marque).
+        let dark = ui.visuals().dark_mode;
         let accent = egui::Color32::from_rgb(52, 199, 89);
-        painter.rect_filled(
-            egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.min.y + 3.0)),
-            0.0,
-            accent,
-        );
+
+        // Palettes : sombre ou claire, dérivées du thème actif.
+        let (bg_top, bg_bottom) = if dark {
+            (
+                egui::Color32::from_rgb(23, 25, 31),
+                egui::Color32::from_rgb(15, 26, 22),
+            )
+        } else {
+            (
+                egui::Color32::from_rgb(246, 248, 252),
+                egui::Color32::from_rgb(224, 236, 231),
+            )
+        };
+        let halo = if dark {
+            egui::Color32::from_rgba_unmultiplied(52, 199, 89, 10)
+        } else {
+            egui::Color32::from_rgba_unmultiplied(52, 199, 89, 24)
+        };
+        let title_color = if dark {
+            egui::Color32::from_rgb(240, 242, 246)
+        } else {
+            egui::Color32::from_rgb(28, 34, 42)
+        };
+        let tag_color = if dark {
+            egui::Color32::from_gray(155)
+        } else {
+            egui::Color32::from_gray(105)
+        };
+        let field_bg = if dark {
+            egui::Color32::from_rgb(38, 42, 52)
+        } else {
+            egui::Color32::from_rgb(255, 255, 255)
+        };
+        let field_stroke = if dark {
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 26)
+        } else {
+            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 20)
+        };
+        let icon_muted = if dark {
+            egui::Color32::from_gray(160)
+        } else {
+            egui::Color32::from_gray(120)
+        };
+        let section_color = if dark {
+            egui::Color32::from_gray(140)
+        } else {
+            egui::Color32::from_gray(120)
+        };
+        let tile_label = if dark {
+            egui::Color32::from_gray(175)
+        } else {
+            egui::Color32::from_gray(110)
+        };
+        let foot_color = if dark {
+            egui::Color32::from_gray(140)
+        } else {
+            egui::Color32::from_gray(120)
+        };
+
+        // Fond : dégradé vertical + bande d'accent + halo.
+        {
+            let painter = ui.painter();
+            let steps = 28;
+            for i in 0..=steps {
+                let t = i as f32 / steps as f32;
+                let y = rect.top() + rect.height() * t;
+                let h = rect.height() / steps as f32 + 1.0;
+                let c = color_lerp(bg_top, bg_bottom, t);
+                painter.rect_filled(
+                    egui::Rect::from_min_size(
+                        egui::pos2(rect.left(), y),
+                        egui::vec2(rect.width(), h),
+                    ),
+                    0.0,
+                    c,
+                );
+            }
+            painter.circle_filled(
+                egui::pos2(rect.center().x, rect.top() + rect.height() * 0.16),
+                rect.width() * 0.42,
+                halo,
+            );
+            painter.rect_filled(
+                egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.min.y + 3.0)),
+                0.0,
+                accent,
+            );
+        }
 
         let mut go: Option<String> = None;
         let engine_host = hostname(&self.search_engine);
+        let blocked = blocklist::blocked_count();
+
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
-            ui.add_space((rect.height() * 0.20).max(32.0));
+            ui.add_space((rect.height() * 0.15).max(24.0));
             ui.vertical_centered(|ui| {
+                // Badge Faraday (bouclier) : dessiné, icône centrée.
+                let (brand_rect, _brand_resp) =
+                    ui.allocate_exact_size(egui::vec2(56.0, 56.0), egui::Sense::hover());
+                if ui.is_rect_visible(brand_rect) {
+                    let p = ui.painter();
+                    p.circle_filled(brand_rect.center(), 28.0, accent);
+                    p.text(
+                        brand_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        icons::SHIELD_CHECK,
+                        egui::FontId::proportional(25.0),
+                        egui::Color32::WHITE,
+                    );
+                }
+                ui.add_space(12.0);
                 ui.label(
                     egui::RichText::new("Faraday")
-                        .size(40.0)
+                        .size(42.0)
                         .strong()
-                        .color(egui::Color32::from_rgb(235, 235, 240)),
+                        .color(title_color),
                 );
-                ui.add_space(6.0);
+                ui.add_space(4.0);
                 ui.label(
                     egui::RichText::new("Votre navigation privée, sans traqueurs")
                         .size(14.0)
-                        .color(egui::Color32::from_gray(150)),
+                        .color(tag_color),
                 );
-                ui.add_space(24.0);
+                ui.add_space(28.0);
 
-                // Barre de recherche / adresse.
-                let sw = (rect.width() * 0.55).clamp(260.0, 640.0);
-                let search = ui.add_sized(
-                    [sw, 38.0],
-                    egui::TextEdit::singleline(&mut self.ntp_query)
-                        .font(egui::TextStyle::Body)
-                        .margin(egui::Margin::symmetric(16, 9))
-                        .hint_text("Rechercher sur le web ou saisir une adresse"),
-                );
-                let submit =
-                    search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                // Barre de recherche « pilule » : loupe + saisie + aller.
+                let sw = (rect.width() * 0.5).clamp(320.0, 700.0);
+                let mut submit = false;
+                egui::Frame::new()
+                    .fill(field_bg)
+                    .stroke(egui::Stroke::new(1.0_f32, field_stroke))
+                    .corner_radius(24.0)
+                    .inner_margin(egui::Margin::symmetric(16, 6))
+                    .show(ui, |ui| {
+                        ui.set_width(sw);
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(icons::MAGNIFYING_GLASS)
+                                        .size(17.0)
+                                        .color(icon_muted),
+                                )
+                                .sense(egui::Sense::hover()),
+                            );
+                            ui.add_space(6.0);
+                            let text_w = (ui.available_width() - 34.0).max(80.0);
+                            let resp = ui.add_sized(
+                                [text_w, 30.0],
+                                egui::TextEdit::singleline(&mut self.ntp_query)
+                                    .font(egui::TextStyle::Body)
+                                    .frame(false)
+                                    .margin(egui::Margin::symmetric(4, 4))
+                                    .hint_text("Rechercher ou saisir une adresse"),
+                            );
+                            let btn = ui.add(
+                                egui::Button::new(
+                                    egui::RichText::new(icons::ARROW_CIRCLE_RIGHT)
+                                        .size(20.0)
+                                        .color(accent),
+                                )
+                                .min_size(egui::vec2(28.0, 28.0))
+                                .frame(false),
+                            );
+                            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            if btn.clicked() || (resp.lost_focus() && enter) {
+                                submit = true;
+                            }
+                        });
+                    });
                 if submit && !self.ntp_query.trim().is_empty() {
                     go = Some(self.ntp_query.clone());
                 }
 
                 ui.add_space(34.0);
 
-                // Raccourcis rapides.
-                let label_hint = egui::RichText::new("Raccourcis")
-                    .size(11.0)
-                    .color(egui::Color32::from_gray(130));
-                ui.label(label_hint);
-                ui.add_space(10.0);
-
-                egui::ScrollArea::horizontal().show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        for link in QUICK_LINKS {
-                            let tile = ui.vertical(|ui| {
-                                let b = ui.add(
-                                    egui::Button::new(
-                                        egui::RichText::new(link.icon).size(28.0).color(link.color),
-                                    )
-                                    .min_size(egui::vec2(64.0, 64.0)),
-                                );
-                                ui.label(
-                                    egui::RichText::new(link.label)
-                                        .size(11.0)
-                                        .color(egui::Color32::from_gray(170)),
-                                );
-                                b
-                            });
-                            if tile.inner.clicked() {
-                                go = Some(link.url.to_string());
-                            }
-                            ui.add_space(8.0);
-                        }
-                    });
-                });
-
-                ui.add_space(28.0);
+                // Raccourcis rapides : tuiles centrées.
                 ui.label(
-                    egui::RichText::new(format!(
-                        "Recherche par défaut : {engine_host} — aucune donnée partagée"
-                    ))
-                    .size(11.0)
-                    .color(egui::Color32::from_gray(110)),
+                    egui::RichText::new("RACCOURCIS")
+                        .size(10.0)
+                        .color(section_color),
                 );
+                ui.add_space(12.0);
+                // Raccourcis rapides : grille calculée en coordonnées absolues
+                // (centrée sur la page, jamais de débordement horizontal).
+                let cell_w = 88.0;
+                let tile_size = 56.0;
+                let tile_gap_x = cell_w - tile_size; // marge de part et d'autre
+                let row_h = 92.0;
+                let total_links = QUICK_LINKS.len();
+                let cols = (((rect.width() - 32.0) / cell_w).floor() as usize)
+                    .clamp(1, total_links);
+                let rows = total_links.div_ceil(cols);
+                let total_w = (cols as f32) * cell_w;
+                let start_x = rect.center().x - total_w / 2.0;
+                let start_y = ui.cursor().top() + 4.0;
+
+                let mut drawn = 0;
+                while drawn < total_links {
+                    let col = drawn % cols;
+                    let row = drawn / cols;
+                    let link = &QUICK_LINKS[drawn];
+                    let (r, g, b) = (link.color.r(), link.color.g(), link.color.b());
+                    let tx = start_x + col as f32 * cell_w + tile_gap_x / 2.0;
+                    let ty = start_y + row as f32 * row_h;
+
+                    let tint = egui::Color32::from_rgba_unmultiplied(r, g, b, if dark { 26 } else { 22 });
+                    let stroke = egui::Color32::from_rgba_unmultiplied(r, g, b, if dark { 60 } else { 90 });
+
+                    let tile_rect = egui::Rect::from_min_size(
+                        egui::pos2(tx, ty),
+                        egui::vec2(tile_size, tile_size),
+                    );
+                    let resp = ui.interact(
+                        tile_rect,
+                        ui.id().with(drawn),
+                        egui::Sense::click(),
+                    );
+                    let p = ui.painter();
+                    let fill = if resp.hovered() {
+                        egui::Color32::from_rgba_unmultiplied(r, g, b, if dark { 42 } else { 36 })
+                    } else {
+                        tint
+                    };
+                    let edge = if resp.hovered() {
+                        egui::Color32::from_rgba_unmultiplied(r, g, b, if dark { 120 } else { 170 })
+                    } else {
+                        stroke
+                    };
+                    p.rect(
+                        tile_rect,
+                        14.0,
+                        fill,
+                        egui::Stroke::new(1.0_f32, edge),
+                        egui::StrokeKind::Inside,
+                    );
+                    p.text(
+                        tile_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        link.icon,
+                        egui::FontId::proportional(22.0),
+                        link.color,
+                    );
+                    p.text(
+                        egui::pos2(tile_rect.center().x, tile_rect.bottom() + 8.0),
+                        egui::Align2::CENTER_TOP,
+                        link.label,
+                        egui::FontId::proportional(11.0),
+                        tile_label,
+                    );
+                    if resp.clicked() {
+                        go = Some(link.url.to_string());
+                    }
+                    drawn += 1;
+                }
+                // Réserve la hauteur des lignes dessinées pour la mise en page.
+                ui.add_space((rows as f32) * row_h);
+                ui.add_space(8.0);
             });
         });
+
+        // Pied de page : signal privacy (en bas à gauche).
+        let p = ui.painter();
+        let protection = blocklist::enabled();
+        let note = if protection {
+            format!(
+                "{} Mode privé par défaut  •  {engine_host}  •  {blocked} requête{} de tracking bloquée{}",
+                icons::SHIELD_CHECK,
+                if blocked > 1 { "s" } else { "" },
+                if blocked > 1 { "s" } else { "" }
+            )
+        } else {
+            format!("{} Protection anti-tracking désactivée (Paramètres)", icons::SHIELD_CHECK)
+        };
+        p.text(
+            egui::pos2(rect.left() + 22.0, rect.bottom() - 18.0),
+            egui::Align2::LEFT_CENTER,
+            note,
+            egui::FontId::proportional(11.5),
+            foot_color,
+        );
+        p.text(
+            egui::pos2(rect.right() - 22.0, rect.bottom() - 18.0),
+            egui::Align2::RIGHT_CENTER,
+            concat!("Faraday v", env!("CARGO_PKG_VERSION"), " — privacy first"),
+            egui::FontId::proportional(11.5),
+            foot_color,
+        );
 
         if let Some(q) = go {
             self.navigate_to(&q);
@@ -1340,6 +1558,43 @@ impl FaradayChrome {
                         });
                     ui.separator();
 
+                    // ===== Apparence (thème) =====
+                    egui::CollapsingHeader::new(
+                        egui::RichText::new("Apparence").size(15.0),
+                    )
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Thème :");
+                            let mut changed = false;
+                            changed |= ui
+                                .selectable_value(&mut self.theme_index, 0u8, "Système")
+                                .changed();
+                            changed |= ui
+                                .selectable_value(&mut self.theme_index, 1u8, "Sombre")
+                                .changed();
+                            changed |= ui
+                                .selectable_value(&mut self.theme_index, 2u8, "Clair")
+                                .changed();
+                            if changed {
+                                let pref = match self.theme_index {
+                                    1 => egui::ThemePreference::Dark,
+                                    2 => egui::ThemePreference::Light,
+                                    _ => egui::ThemePreference::System,
+                                };
+                                ctx.set_theme(pref);
+                            }
+                        });
+                        ui.label(
+                            egui::RichText::new(
+                                "« Système » suit automatiquement le mode clair/sombre de Windows.",
+                            )
+                            .size(11.0)
+                            .color(egui::Color32::from_gray(140)),
+                        );
+                    });
+                    ui.separator();
+
                     ui.horizontal(|ui| {
                         if ui.button("Rétablir les valeurs par défaut").clicked() {
                             reset = true;
@@ -1561,6 +1816,19 @@ impl eframe::App for FaradayChrome {
         // Redessiner en continu pour recevoir les on_paint de CEF.
         ctx.request_repaint();
 
+        // Couleurs du chrome selon le thème actif (sombre / clair).
+        let dark_theme = ctx.theme() == egui::Theme::Dark;
+        let tabs_bg = if dark_theme {
+            egui::Color32::from_rgb(34, 36, 43)
+        } else {
+            egui::Color32::from_rgb(248, 249, 252)
+        };
+        let chrome_bg = if dark_theme {
+            egui::Color32::from_rgb(28, 30, 36)
+        } else {
+            egui::Color32::from_rgb(240, 242, 246)
+        };
+
         // Raccourcis clavier du chrome (avant tout envoi à la page).
         {
             let (t, l, h, j) = ctx.input(|i| {
@@ -1596,7 +1864,7 @@ impl eframe::App for FaradayChrome {
         egui::TopBottomPanel::top("tabs")
             .frame(
                 egui::Frame::side_top_panel(&ctx.style())
-                    .fill(egui::Color32::from_rgb(34, 36, 43))
+                    .fill(tabs_bg)
                     .inner_margin(egui::Margin::symmetric(8, 4)),
             )
             .show(ctx, |ui| {
@@ -1606,7 +1874,7 @@ impl eframe::App for FaradayChrome {
         egui::TopBottomPanel::top("chrome")
             .frame(
                 egui::Frame::side_top_panel(&ctx.style())
-                    .fill(egui::Color32::from_rgb(28, 30, 36))
+                    .fill(chrome_bg)
                     .inner_margin(egui::Margin::symmetric(10, 8)),
             )
             .show(ctx, |ui| {
@@ -1848,6 +2116,7 @@ impl eframe::App for FaradayChrome {
         let data = session::SessionData {
             active: self.active,
             tabs: self.tabs.iter().map(|t| t.url.clone()).collect(),
+            theme: self.theme_index,
             history: self.history.lock().unwrap().clone(),
         };
         session::save(&data);

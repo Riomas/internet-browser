@@ -41,6 +41,8 @@ pub const COPY: &str = "\u{E1CA}";
 pub const ARROW_SQUARE_UP_RIGHT: &str = "\u{E07C}";
 /// Réglages : engrenage.
 pub const GEAR: &str = "\u{E270}";
+/// Loupe (recherche).
+pub const MAGNIFYING_GLASS: &str = "\u{E30C}";
 /// Cadenas (sécurité).
 pub const LOCK: &str = "\u{E2FA}";
 /// Globe (web générique).
