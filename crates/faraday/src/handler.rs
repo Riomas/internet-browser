@@ -120,6 +120,27 @@ fn userfree_to_string(raw: &CefStringUserfree) -> String {
     CefStringUtf16::from(raw).to_string()
 }
 
+/// Domaine « enregistrable » approximatif : les deux derniers labels de l'hôte
+/// (équivalent simplifié de eTLD+1, sans liste publique). Ex. `img.eff.org` →
+/// `eff.org`, `eff.org` → `eff.org`.
+fn registrable_domain(host: &str) -> String {
+    let labels: Vec<&str> = host.split('.').filter(|s| !s.is_empty()).collect();
+    if labels.len() <= 2 {
+        host.to_string()
+    } else {
+        labels[labels.len() - 2..].join(".")
+    }
+}
+
+/// Vrai si un hôte est « tierce partie » par rapport au first-party donné.
+/// Même site (même domaine enregistrable, y compris sous-domaines) => 1re partie.
+fn host_is_third_party(host: &str, first_party: &str) -> bool {
+    if host.is_empty() || first_party.is_empty() {
+        return false;
+    }
+    registrable_domain(host) != registrable_domain(first_party)
+}
+
 /// Vrai si la requête est « tierce partie » : son hôte diffère de celui du
 /// contexte de cookies (first party = site principal affiché).
 fn is_third_party_request(request: &Request) -> bool {
@@ -131,15 +152,7 @@ fn is_third_party_request(request: &Request) -> bool {
         let raw = request.first_party_for_cookies();
         userfree_to_string(&raw)
     };
-    let host = blocklist::host_of(&url);
-    let first = blocklist::host_of(&first_party);
-    if host.is_empty() || first.is_empty() {
-        return false;
-    }
-    // Même site (ou sous-domaine) => première partie, sinon tierce partie.
-    host != first
-        && !host.ends_with(&format!(".{first}"))
-        && !first.ends_with(&format!(".{host}"))
+    host_is_third_party(&blocklist::host_of(&url), &blocklist::host_of(&first_party))
 }
 
 // Filtre de cookies : refuse l'envoi/l'enregistrement des cookies tiers
@@ -578,5 +591,22 @@ wrap_render_handler! {
                 buf.dirty = true;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn third_party_detection() {
+        // Domaines enregistrables différents => tierce partie.
+        assert!(host_is_third_party("trackersimulator.org", "eff.org"));
+        assert!(host_is_third_party("ads.doubleclick.net", "example.com"));
+        // Même site, y compris entre sous-domaines frères => première partie.
+        assert!(!host_is_third_party("www.eff.org", "eff.org"));
+        assert!(!host_is_third_party("img.eff.org", "www.eff.org"));
+        assert!(!host_is_third_party("cdn2.doubleclick.net", "ads.doubleclick.net"));
+        assert!(!host_is_third_party("", "eff.org"));
     }
 }

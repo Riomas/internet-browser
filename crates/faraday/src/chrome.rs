@@ -2150,3 +2150,44 @@ pub fn run(view_size: ViewSize) -> anyhow::Result<()> {
     )
     .map_err(|e| anyhow::anyhow!("{e}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn looks_like_url_detection() {
+        assert!(looks_like_url("https://example.com/path"));
+        assert!(looks_like_url("example.com"));
+        assert!(looks_like_url("duckduckgo.com"));
+        assert!(!looks_like_url("bonjour tout le monde"));
+        assert!(!looks_like_url(""));
+    }
+
+    #[test]
+    fn url_encoding() {
+        assert_eq!(url_encode("a b"), "a%20b");
+        assert_eq!(url_encode("a/b?c=1&d"), "a%2Fb%3Fc%3D1%26d");
+        assert_eq!(url_encode("Rust!"), "Rust%21");
+    }
+
+    #[test]
+    fn resolve_address_or_search() {
+        assert_eq!(
+            resolve_input("https://x.fr", "https://duckduckgo.com"),
+            "https://x.fr"
+        );
+        assert_eq!(resolve_input("x.fr", "https://duckduckgo.com"), "https://x.fr");
+        let q = resolve_input("question test", "https://duckduckgo.com");
+        assert!(q.starts_with("https://duckduckgo.com/?q=question%20test"));
+    }
+
+    #[test]
+    fn hostname_and_speed() {
+        assert_eq!(hostname("https://www.Example.com/path"), "www.Example.com");
+        assert_eq!(hostname("https://sub.example.org"), "sub.example.org");
+        assert_eq!(format_speed(1024), "1 Ko/s");
+        assert_eq!(format_speed(5 * 1024 * 1024), "5.0 Mo/s");
+    }
+}
+

@@ -134,3 +134,37 @@ pub fn upsert(list: &mut Vec<DownloadEntry>, entry: DownloadEntry) {
         list.push(entry);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_file_name_sanitizes() {
+        assert_eq!(safe_file_name("../../evil<>.txt"), "evil.txt");
+        assert_eq!(safe_file_name("fichier:*.txt"), "fichier.txt");
+        assert_eq!(safe_file_name("a?b|c\u{0}.txt"), "abc.txt");
+        assert_eq!(safe_file_name("   "), "telechargement");
+    }
+
+    #[test]
+    fn unique_path_dedups() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("faraday_test_{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let first = unique_path(&dir, "fichier.txt");
+        std::fs::write(&first, b"1").unwrap();
+        let second = unique_path(&dir, "fichier.txt");
+
+        assert_ne!(first, second);
+        assert!(first.to_string_lossy().ends_with("fichier.txt"));
+        assert!(second.to_string_lossy().contains("fichier (1).txt"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

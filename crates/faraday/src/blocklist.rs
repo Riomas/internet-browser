@@ -205,4 +205,24 @@ mod tests {
         assert!(!should_block("https://duckduckgo.com/"));
         assert!(!should_block("https://fr.wikipedia.org/wiki/Faraday"));
     }
+
+    #[test]
+    fn real_list_blocks_eff_simulators() {
+        // Domaines de test EFF Cover Your Tracks (trackers simulés) :
+        // bloqués, tandis que le « first-party simulator » reste autorisé.
+        assert!(should_block("https://trackersimulator.org/pixel?a=1"));
+        assert!(should_block("http://eviltracker.net/pixel?a=1"));
+        assert!(should_block("https://www.do-not-tracker.org/collect"));
+        assert!(!should_block("https://firstpartysimulator.net/x"));
+        assert!(!should_block("https://firstpartysimulator.org/y"));
+    }
+
+    #[test]
+    fn exceptions_override() {
+        // `@@||...` doit toujours autoriser le domaine et ses sous-domaines.
+        let bl = BlockList::parse("||example.com^\n@@||allow.example.com^\n");
+        assert!(bl.blocks("ads.example.com"));
+        assert!(!bl.blocks("allow.example.com"));
+        assert!(!bl.blocks("sub.allow.example.com"));
+    }
 }

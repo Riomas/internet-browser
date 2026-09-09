@@ -67,3 +67,46 @@ pub fn push(history: &History, url: &str) {
         list.truncate(MAX_ENTRIES);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn new_history() -> History {
+        Arc::new(Mutex::new(Vec::new()))
+    }
+
+    #[test]
+    fn push_inserts_at_front_and_dedups() {
+        let h = new_history();
+        push(&h, "https://eff.org/");
+        push(&h, "https://ddg.co/");
+        // Doublon consécutif : ignoré.
+        push(&h, "https://ddg.co/");
+        // Nouvelle visite d'un site déjà vu : remonte en tête.
+        push(&h, "https://eff.org/deep");
+
+        let list = h.lock().unwrap();
+        assert_eq!(list.len(), 3);
+        assert_eq!(list[0].url, "https://eff.org/deep");
+        assert_eq!(list[0].title, "eff.org");
+        assert_eq!(list[1].url, "https://ddg.co/");
+        assert_eq!(list[2].url, "https://eff.org/");
+    }
+
+    #[test]
+    fn push_ignores_empty_and_about() {
+        let h = new_history();
+        push(&h, "");
+        push(&h, "   ");
+        push(&h, "about:blank");
+        assert!(h.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn hostname_extraction() {
+        assert_eq!(hostname("https://www.example.com/path?x=1"), "www.example.com");
+        assert_eq!(hostname("https://eff.org"), "eff.org");
+        assert_eq!(hostname("duckduckgo.com"), "duckduckgo.com");
+    }
+}

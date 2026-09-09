@@ -112,39 +112,94 @@ struct FileConfig {
     privacy: PrivacyConfig,
 }
 
-/// Inscrit tous les switches « zéro tracking » sur la ligne de commande CEF.
-pub fn apply_privacy_switches(config: &PrivacyConfig, command_line: &mut CommandLine) {
+/// Liste des switches « zéro tracking » correspondant à la configuration
+/// (fonction pure, testable sans instance CEF).
+pub fn privacy_switch_strings(config: &PrivacyConfig) -> Vec<String> {
+    let mut out = Vec::new();
     if config.disable_component_update {
-        command_line.append_switch(Some(&"--disable-component-update".into()));
+        out.push("--disable-component-update".into());
     }
     if config.disable_default_apps {
-        command_line.append_switch(Some(&"--disable-default-apps".into()));
+        out.push("--disable-default-apps".into());
     }
     if config.disable_sync {
-        command_line.append_switch(Some(&"--disable-sync".into()));
+        out.push("--disable-sync".into());
     }
     if config.disable_suggestions {
-        command_line.append_switch(Some(&"--disable-suggestions".into()));
+        out.push("--disable-suggestions".into());
     }
     if config.disable_personal_autofill {
-        command_line.append_switch(Some(&"--disable-personal-autofill".into()));
+        out.push("--disable-personal-autofill".into());
     }
     if config.block_third_party_cookies {
-        command_line.append_switch(Some(&"--block-third-party-cookies".into()));
+        out.push("--block-third-party-cookies".into());
     }
     if config.no_referrer {
-        command_line.append_switch(Some(&"--no-referrers".into()));
+        out.push("--no-referrers".into());
     }
     if config.force_https {
-        command_line.append_switch(Some(&"--force-https".into()));
+        out.push("--force-https".into());
     }
     if !config.disable_features.is_empty() {
-        let value = config.disable_features.join(",");
-        let switch = format!("--disable-features={value}");
+        out.push(format!("--disable-features={}", config.disable_features.join(",")));
+    }
+    // WebRTC : on masque l'IP réelle (anti-empreinte) — toujours actif.
+    out.push("--webrtc-ip-handling-policy=disable_non_proxied_udp".into());
+    out
+}
+
+/// Inscrit tous les switches « zéro tracking » sur la ligne de commande CEF.
+pub fn apply_privacy_switches(config: &PrivacyConfig, command_line: &mut CommandLine) {
+    for switch in privacy_switch_strings(config) {
         command_line.append_switch(Some(&switch.as_str().into()));
     }
-    // WebRTC : on masque l'IP réelle (anti-empreinte).
-    command_line.append_switch(Some(
-        &"--webrtc-ip-handling-policy=disable_non_proxied_udp".into(),
-    ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_are_privacy_first() {
+        let cfg = PrivacyConfig::default();
+        assert!(cfg.enable_tracker_blocking);
+        assert!(cfg.enable_do_not_track);
+        assert!(cfg.block_third_party_cookies);
+        assert!(cfg.no_referrer);
+        assert!(cfg.force_https);
+        assert_eq!(cfg.default_search_engine, "https://duckduckgo.com");
+    }
+
+    #[test]
+    fn toml_roundtrip() {
+        let wrapper = FileConfig {
+            privacy: PrivacyConfig::default(),
+        };
+        let text = toml::to_string(&wrapper).expect("sérialisation");
+        let back: FileConfig = toml::from_str(&text).expect("parse");
+        assert!(back.privacy.enable_tracker_blocking);
+        assert_eq!(
+            back.privacy.default_search_engine,
+            "https://duckduckgo.com"
+        );
+    }
+
+    #[test]
+    fn switches_reflect_config() {
+        let cfg = PrivacyConfig::default();
+        let list = privacy_switch_strings(&cfg);
+        assert!(list.iter().any(|s| s == "--block-third-party-cookies"));
+        assert!(list.iter().any(|s| s == "--no-referrers"));
+        assert!(list.iter().any(|s| s == "--force-https"));
+        assert!(list.iter().any(|s| s.starts_with("--disable-features=")));
+        assert!(list.iter().any(|s| s.contains("webrtc-ip-handling-policy")));
+
+        // Quand on désactive un réglage, son switch disparaît.
+        let mut relaxed = PrivacyConfig::default();
+        relaxed.no_referrer = false;
+        relaxed.force_https = false;
+        let list2 = privacy_switch_strings(&relaxed);
+        assert!(!list2.iter().any(|s| s == "--no-referrers"));
+        assert!(!list2.iter().any(|s| s == "--force-https"));
+    }
 }
