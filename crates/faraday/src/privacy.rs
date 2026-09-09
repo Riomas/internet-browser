@@ -1,17 +1,27 @@
 //! Couche de confidentialité de Faraday.
 //!
-//! Tous les trackings sont désactivés **par défaut**. Les réglages de
-//! `configs/privacy.toml` sont injectés dans le moteur Chromium via :
+//! Tous les trackings sont désactivés **par défaut**. Les réglages sont
+//! injectés dans le moteur Chromium via :
 //!   - les **switches** en ligne de commande CEF (au démarrage du processus
 //!     browser, via `App::on_before_command_line_processing`),
 //!   - le **blocage réseau** dans le `RequestHandler` (voir `handler.rs`).
+//!
+//! La config par défaut est **embarquée dans le binaire** (fichier
+//! `configs/privacy.toml` compilé via `include_str!`). L'utilisateur peut la
+//! surcharger via `%APPDATA%\Faraday\privacy.toml` (créé au 1er lancement) —
+//! aucune dépendance au chemin de compilation (indispensable une fois Faraday
+//! installé sur une machine propre).
 
 use cef::{CommandLine, ImplCommandLine};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 use crate::blocklist;
 
-/// Configuration de confidentialité chargée depuis `configs/privacy.toml`.
+/// Contenu TOML par défaut, embarqué au moment de la compilation.
+const DEFAULT_PRIVACY_TOML: &str = include_str!("../configs/privacy.toml");
+
+/// Configuration de confidentialité (défaut embarqué / surcharge locale).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrivacyConfig {
     /// Bloque les requêtes vers les domaines de la blocklist (en direct).
@@ -64,20 +74,49 @@ impl Default for PrivacyConfig {
     }
 }
 
+/// Répertoire des données Faraday dans `%APPDATA%`.
+pub fn appdata_dir() -> PathBuf {
+    let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(base).join("Faraday")
+}
+
+/// Chemin du fichier de configuration utilisateur (`%APPDATA%\Faraday\privacy.toml`).
+pub fn user_config_path() -> PathBuf {
+    appdata_dir().join("privacy.toml")
+}
+
+/// Parse un contenu TOML `[privacy]` (retombe sur les défauts si invalide).
+fn parse_toml(content: &str) -> PrivacyConfig {
+    toml::from_str::<FileConfig>(content)
+        .map(|cfg| cfg.privacy)
+        .unwrap_or_else(|e| {
+            eprintln!("[faraday] config privacy invalide ({e}), valeurs par défaut");
+            PrivacyConfig::default()
+        })
+}
+
 impl PrivacyConfig {
-    /// Charge la configuration depuis le disque, ou retombe sur les valeurs
-    /// par défaut si le fichier est absent/invalide.
+    /// Charge la configuration : défaut embarqué, surchargé par le fichier
+    /// utilisateur `%APPDATA%\Faraday\privacy.toml` s'il existe (sinon créé).
     pub fn load() -> Self {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/configs/privacy.toml");
-        let config = match std::fs::read_to_string(path) {
-            Ok(content) => toml::from_str(&content)
-                .map(|cfg: FileConfig| cfg.privacy)
-                .unwrap_or_else(|e| {
-                    eprintln!("[faraday] config privacy invalide ({e}), valeurs par défaut");
-                    PrivacyConfig::default()
-                }),
-            Err(_) => PrivacyConfig::default(),
-        };
+        // 1) Défaut embarqué (compile-time) — toujours valide.
+        let mut config = parse_toml(DEFAULT_PRIVACY_TOML);
+
+        // 2) Surcharge utilisateur si le fichier existe.
+        let path = user_config_path();
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(parsed) = toml::from_str::<FileConfig>(&content) {
+                config = parsed.privacy;
+            } else {
+                eprintln!("[faraday] config utilisateur invalide ({path:?}), défaut embarqué");
+            }
+        } else if let Some(parent) = path.parent() {
+            // 3) 1er lancement : on matérialise la config par défaut pour que
+            //    l'utilisateur puisse la modifier (et que save() fonctionne).
+            let _ = std::fs::create_dir_all(parent);
+            let _ = std::fs::write(&path, DEFAULT_PRIVACY_TOML);
+        }
+
         // Applique immédiatement les réglages « en direct » (blocage, DNT).
         config.apply_runtime();
         config
@@ -89,15 +128,21 @@ impl PrivacyConfig {
         blocklist::set_dnt(self.enable_do_not_track);
     }
 
-    /// Persiste la configuration dans `configs/privacy.toml`.
+    /// Persiste la configuration utilisateur dans `%APPDATA%\Faraday\privacy.toml`.
     pub fn save(&self) {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/configs/privacy.toml");
+        let path = user_config_path();
+        if let Some(parent) = path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                eprintln!("[faraday] config privacy: création répertoire impossible ({e})");
+                return;
+            }
+        }
         let wrapper = FileConfig {
             privacy: self.clone(),
         };
         match toml::to_string_pretty(&wrapper) {
             Ok(content) => {
-                if let Err(e) = std::fs::write(path, content) {
+                if let Err(e) = std::fs::write(&path, content) {
                     eprintln!("[faraday] config privacy: écriture impossible ({e})");
                 }
             }
