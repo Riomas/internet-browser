@@ -120,6 +120,63 @@ fn userfree_to_string(raw: &CefStringUserfree) -> String {
     CefStringUtf16::from(raw).to_string()
 }
 
+/// Vrai si la requête est « tierce partie » : son hôte diffère de celui du
+/// contexte de cookies (first party = site principal affiché).
+fn is_third_party_request(request: &Request) -> bool {
+    let url = {
+        let raw = request.url();
+        userfree_to_string(&raw)
+    };
+    let first_party = {
+        let raw = request.first_party_for_cookies();
+        userfree_to_string(&raw)
+    };
+    let host = blocklist::host_of(&url);
+    let first = blocklist::host_of(&first_party);
+    if host.is_empty() || first.is_empty() {
+        return false;
+    }
+    // Même site (ou sous-domaine) => première partie, sinon tierce partie.
+    host != first
+        && !host.ends_with(&format!(".{first}"))
+        && !first.ends_with(&format!(".{host}"))
+}
+
+// Filtre de cookies : refuse l'envoi/l'enregistrement des cookies tiers
+// (blocage réel du suivi inter-sites, testé par EFF Cover Your Tracks).
+wrap_cookie_access_filter! {
+    struct FaradayCookieAccessFilter;
+
+    impl CookieAccessFilter {
+        fn can_send_cookie(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            request: Option<&mut Request>,
+            _cookie: Option<&Cookie>,
+        ) -> ::std::os::raw::c_int {
+            match request {
+                Some(r) if is_third_party_request(r) => 0,
+                _ => 1,
+            }
+        }
+
+        fn can_save_cookie(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            request: Option<&mut Request>,
+            _response: Option<&mut Response>,
+            _cookie: Option<&Cookie>,
+        ) -> ::std::os::raw::c_int {
+            match request {
+                Some(r) if is_third_party_request(r) => 0,
+                _ => 1,
+            }
+        }
+    }
+}
+
 wrap_download_handler! {
     struct FaradayDownloadHandler {
         downloads: Downloads,
@@ -464,6 +521,15 @@ wrap_resource_request_handler! {
             }
 
             ReturnValue::CONTINUE
+        }
+
+        fn cookie_access_filter(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _request: Option<&mut Request>,
+        ) -> Option<CookieAccessFilter> {
+            Some(FaradayCookieAccessFilter::new())
         }
     }
 }

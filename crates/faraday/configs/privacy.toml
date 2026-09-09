@@ -1,5 +1,5 @@
 [privacy]
-enable_tracker_blocking = false
+enable_tracker_blocking = true
 enable_do_not_track = true
 disable_component_update = true
 disable_default_apps = true

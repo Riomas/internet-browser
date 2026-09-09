@@ -192,4 +192,17 @@ mod tests {
         assert_eq!(host_of("https://Sub.Example.com/path?x=1"), "sub.example.com");
         assert_eq!(host_of("http://user@host.io:8080/a"), "host.io");
     }
+
+    #[test]
+    fn real_list_blocks_known_trackers() {
+        // Vérifie que la liste embarquée couvre bien des domaines types.
+        assert!(should_block("https://www.google-analytics.com/collect?v=1"));
+        assert!(should_block("https://sb.scorecardresearch.com/b?c=1"));
+        assert!(should_block("http://pixel.quantserve.com/pixel?a=1"));
+        assert!(should_block("https://ad.doubleclick.net/ddm/"));
+        assert!(should_block("https://ib.adnxs.com/ut/v2"));
+        assert!(should_block("https://stats.g.doubleclick.net/r/collect"));
+        assert!(!should_block("https://duckduckgo.com/"));
+        assert!(!should_block("https://fr.wikipedia.org/wiki/Faraday"));
+    }
 }
