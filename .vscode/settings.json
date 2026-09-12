@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^git branch backup-avant-nettoyage 2>&1; git branch --list \"backup-avant-nettoyage\"; Write-Output \"=== point de reprise ===\"; git rev-parse --short backup-avant-nettoyage$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
