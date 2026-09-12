@@ -12,6 +12,9 @@
     .\packaging\build-release.ps1 -Inno -CertPath my.pfx -CertPass "***" -SignAppFiles
                                                        # signe AUSSI le lot applicatif
                                                        # (certificat approuve REQUIS sur la cible)
+    .\packaging\build-release.ps1 -Inno -CertThumbprint 1A2B...      # certificat du magasin
+    .\packaging\build-release.ps1 -Inno -CertThumbprint 1A2B... -Csp "Certum SimplySign"
+                                                       # token/carte ou SimplySign (coffre HSM)
 
   Pre-requis : Rust stable (MSVC) + CMake + Ninja, variable CEF_PATH positionnee.
 
@@ -27,6 +30,9 @@ param(
     [switch]$Inno,
     [string]$CertPath = "",
     [string]$CertPass = "",
+    [string]$CertThumbprint = "",
+    [string]$Csp = "",
+    [string]$KeyContainer = "",
     [switch]$SignAppFiles
 )
 
@@ -164,7 +170,8 @@ Get-ChildItem $stage -Filter "*.log" -File -ErrorAction SilentlyContinue |
 # exige un lot homogene ET un certificat approuve sur la machine cible. Un lot
 # signe par un certificat non approuve ne demarre PAS (voir docs/SIGNATURE.md).
 $signtool = $null
-if ($CertPath) {
+$signActive = [bool]($CertPath -or $CertThumbprint)
+if ($signActive) {
     $signtool = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source
     if (-not $signtool) {
         $cand = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
@@ -174,21 +181,35 @@ if ($CertPath) {
     if (-not $signtool) {
         Write-Warning "signtool.exe introuvable (installe le Windows SDK) - signature ignoree."
         $CertPath = ""
-    } elseif (-not (Test-Path $CertPath)) {
+        $CertThumbprint = ""
+    } elseif ($CertPath -and -not (Test-Path $CertPath)) {
         Write-Warning "Certificat introuvable : $CertPath - signature ignoree."
         $CertPath = ""
         $signtool = $null
     } else {
         Write-Host "==> signtool : $signtool"
-        Write-Host "==> certificat : $CertPath"
+        if ($CertThumbprint) {
+            Write-Host "==> certificat : magasin, empreinte $CertThumbprint"
+            if ($Csp) { Write-Host "    fournisseur (CSP) : $Csp" }
+            if ($KeyContainer) { Write-Host "    conteneur de cles : $KeyContainer" }
+        } else {
+            Write-Host "==> certificat : $CertPath"
+        }
     }
 }
 
 function Invoke-FaradaySign {
     param([string]$Path)
     if (-not $signtool) { return }
-    $certArg = @("/f", $CertPath)
-    if ($CertPass) { $certArg += @("/p", $CertPass) }
+    if ($CertThumbprint) {
+        # Certificat du magasin : carte cryptographique, token USB ou SimplySign (HSM).
+        $certArg = @("/sha1", $CertThumbprint)
+        if ($Csp) { $certArg += @("/csp", $Csp) }
+        if ($KeyContainer) { $certArg += @("/kc", $KeyContainer) }
+    } else {
+        $certArg = @("/f", $CertPath)
+        if ($CertPass) { $certArg += @("/p", $CertPass) }
+    }
     Write-Host "==> Signature : $(Split-Path $Path -Leaf)"
     & $signtool sign /fd SHA256 @certArg /tr http://timestamp.digicert.com /td SHA256 /v $Path
     if ($LASTEXITCODE -ne 0) { throw "Echec de signature : $Path (code $LASTEXITCODE)" }

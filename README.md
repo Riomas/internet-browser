@@ -61,7 +61,62 @@ Les switches appliqués au démarrage (voir `crates/faraday/configs/privacy.toml
 Le blocage réseau des trackers est géré dans `handler.rs` (domaines de tracking +
 publicité rejetés avant chargement).
 
-## Étapes suivantes (Phase 1+)
-- UI du navigateur (onglets, barre d'adresse) — `egui`/`iced`.
-- Page d'accueil Faraday locale.
-- Liste de règles complète (EasyList + anti-track) en Phase 2.
+## État du projet
+
+- **v0.1.0** — phases 0 à 5 terminées : noyau CEF, blocage des trackers/publicités,
+  interface complète (onglets, favoris, historique, téléchargements, profils,
+  déblocage par site, suspension temporaire), **sandbox Chromium**, distribution
+  portable + installateur.
+- **28 tests unitaires** : `cargo test --package faraday --lib`.
+- Validation externe : **EFF Cover Your Tracks** (*blocking tracking ads / invisible
+  trackers : Yes*) sur une installation propre.
+
+### Modules principaux (`crates/faraday/src/`)
+
+| Module | Rôle |
+|---|---|
+| `lib.rs` | démarrage CEF, appel `RunWinMain` (variante sandbox) |
+| `chrome.rs` | interface egui : onglets, barre d'outils, réglages |
+| `handler.rs` | client CEF : blocage réseau, cookies tiers, DNT |
+| `blocklist.rs` | moteur de règles + exceptions par site + statistiques |
+| `privacy.rs`, `configs/privacy.toml` | configuration « zéro tracking » par défaut |
+| `bookmarks.rs`, `history.rs`, `session.rs`, `profiles.rs`, `downloads.rs` | données locales |
+| `packaging/` (`build-release.ps1`, `faraday.iss`) | zip portable, installateur, signature |
+
+## Téléchargement
+
+Les versions publiées sont sur la page **[Releases](https://github.com/Riomas/internet-browser/releases)** :
+
+| Fichier | Description |
+|---|---|
+| `Faraday-0.1.0-x64-portable.zip` | version **portable** : décompresser puis lancer `faraday.exe` |
+| `Faraday-Setup-0.1.0-x64.exe` | **installateur** (par utilisateur, sans droits administrateur) |
+| `SHA256SUMS.txt` | empreintes SHA-256 pour vérifier l'intégrité |
+
+> Windows 10/11 **64 bits**. Le sandbox Chromium est actif, et aucun composant tiers
+> n'est téléchargé au démarrage. Le désinstallateur est fourni par l'installateur.
+
+## Licence
+
+**MIT _ou_ Apache-2.0**, au choix de l'utilisateur : voir [`LICENSE-MIT`](LICENSE-MIT) et
+[`LICENSE-APACHE`](LICENSE-APACHE).
+
+## Politique de signature de code
+
+- **Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).**
+- Mainteneur (auteur, relecteur et approbateur) : [@Riomas](https://github.com/Riomas)
+- Validation des changements : toute contribution externe passe par une *pull request* relue
+  avant intégration.
+- **Vie privée : ce programme ne transfère aucune information vers un système réseau tiers
+  sans demande explicite de l'utilisateur ou de la personne qui l'installe.** Aucune
+  télémétrie, aucun compte, aucun envoi de statistiques (voir
+  `docs/GUIDE_UTILISATEUR.md`, « Vos données »).
+- Composants amont inclus : `libcef.dll`, `chrome_elf.dll`, `libEGL.dll`, `libGLESv2.dll`,
+  `vk_swiftshader.dll`, `d3dcompiler_47.dll`… proviennent de **CEF / Chromium** (licence
+  BSD) et sont redistribués tels quels. `faraday.exe` est le *bootstrap* de CEF renommé ;
+  le code propre à Faraday est compilé dans `faraday.dll`.
+
+## Documentation
+
+`docs/` contient le guide utilisateur, le guide de signature, la procédure de test en
+machine propre et la marche à suivre pour un certificat open source.

@@ -1,0 +1,77 @@
+name: Build Windows
+
+# Build reproductible en CI : prerequis pour la signature gratuite par SignPath Foundation
+# (et verification automatique a chaque modification).
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust stable (MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      # Inno Setup n'est pas livre par defaut sur les runners : le script de
+      # packaging le cherche dans C:\Program Files (x86)\Inno Setup 6\.
+      - name: Inno Setup 6
+        run: choco install innosetup --no-progress -y
+
+      # CEF (~150 Mo) et cargo sont mis en cache : premier build lent, suivants rapides.
+      - name: Cache CEF + cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/cef
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cef-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cef-${{ runner.os }}-
+
+      - name: Tests unitaires
+        run: cargo test --package faraday --lib
+
+      - name: Build release + distribution (zip portable + installateur)
+        shell: pwsh
+        run: .\packaging\build-release.ps1 -Sandbox -Inno
+
+      - name: Empreintes SHA-256
+        shell: pwsh
+        run: Get-Content .\dist\SHA256SUMS.txt
+
+      - name: Publication des artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: faraday-windows-x64
+          path: |
+            dist/*-x64-portable.zip
+            dist/Faraday-Setup-*.exe
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+      # ---------------------------------------------------------------------
+      # Signature de code (a activer une fois le projet accepte par SignPath)
+      # ---------------------------------------------------------------------
+      # La signature des binaires amont de CEF (chrome_elf.dll) doit d'abord
+      # etre confirmee par SignPath : voir docs/CERTIFICAT_OPENSOURCE.md (§4).
+      #
+      # - name: Soumettre la demande de signature
+      #   if: startsWith(github.ref, 'refs/tags/v')
+      #   uses: signpath/github-action-submit-signing-request@v1
+      #   with:
+      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #     organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+      #     project-slug: faraday
+      #     signing-policy-slug: release-signing
+      #     github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      #     wait-for-completion: true
+      #     output-artifact-directory: signed
