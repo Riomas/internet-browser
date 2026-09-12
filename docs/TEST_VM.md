@@ -111,6 +111,24 @@ décompressé.)
       Résultat attendu : **« Blocking tracking ads? → Yes »** et
       **« Blocking invisible trackers? → Yes »**.
 - [ ] Le **bouclier vert** en haut à droite affiche un compteur > 0 après navigation.
+- [ ] **Déblocage par site** : sur la page de test EFF, cliquer sur le bouton
+      **bouclier** de la barre d'outils (il passe en orange) puis relancer le test.
+      Le verdict ne bascule que si **les trois** domaines de test sont exemptés :
+      `coveryourtracks.eff.org`, `firstpartysimulator.net`,
+      `firstpartysimulator.org` (le test interroge chaque piston depuis
+      trois « premières parties » distinctes).
+- [ ] Vérification fine (optionnelle) : lancer avec `FARADAY_DIAG=1` et consulter
+      `%APPDATA%\Faraday\profiles\<profil>\diag.log` → chaque ligne indique
+      `BLOQUE` ou `AUTORISE` (voir guide utilisateur, « Diagnostic avancé »).
+- [ ] **Suspension temporaire** : cliquer sur le **bouclier-compteur** → il passe en
+      orange « off », le compteur cesse d'augmenter ; relancer le test EFF → **No/No**.
+      Cliquer à nouveau → le compteur repart et le test redevient **Yes/Yes**.
+- [ ] Après redémarrage, la protection est **réactivée** (la suspension n'est pas enregistrée).
+
+> 🤖 **Banc de test automatisé** : `tools/diag/diag-tracking.wsb` exécute tout
+> cela seul dans un Windows Sandbox (page locale + vrai test EFF, avec et sans
+> exemption) et dépose les journaux dans `tools/diag/out/`. Le Sandbox s'éteint
+> automatiquement à la fin.
 
 ### 3.3 Fonctionnalités
 - [ ] Multi-onglets (`+`, `Ctrl+T`), fermeture (`×`, `Ctrl+W`).

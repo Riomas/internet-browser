@@ -120,6 +120,65 @@ fn userfree_to_string(raw: &CefStringUserfree) -> String {
     CefStringUtf16::from(raw).to_string()
 }
 
+/// Journal de diagnostic technique (aide au dépannage, **désactivé** par
+/// défaut : activer avec la variable d'environnement `FARADAY_DIAG=1`).
+///
+/// Respect de la vie privée : on n'écrit **que des noms d'hôtes** de requêtes
+/// déjà listées comme pistes potentielles, jamais d'URL complète, jamais de
+/// chemin, de paramètre ni de cookie.
+fn diag(line: &str) {
+    use std::io::Write;
+    static LOG: OnceLock<Mutex<Option<std::fs::File>>> = OnceLock::new();
+    let log = LOG.get_or_init(|| {
+        if std::env::var_os("FARADAY_DIAG").is_none() {
+            return Mutex::new(None);
+        }
+        let dir = crate::privacy::appdata_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        Mutex::new(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join("diag.log"))
+                .ok(),
+        )
+    });
+    if let Ok(mut guard) = log.lock() {
+        if let Some(file) = guard.as_mut() {
+            let _ = writeln!(file, "{line}");
+        }
+    }
+}
+
+/// Hôte du document de **plus haut niveau** (« first party » réel), obtenu en
+/// remontant la chaîne des frames depuis la frame qui déclenche la requête.
+///
+/// Pourquoi ne pas se contenter de `Request::first_party_for_cookies()` ?
+/// Ce champ n'est renseigné par CEF que pour les requêtes construites via
+/// `CefURLRequest` ; pour les requêtes réseau ordinaires il peut être **vide**.
+/// Or c'est lui qui sert à décider si une requête est « tierce partie » et si
+/// le site courant est exempté : s'il est vide, le déblocage par site ne
+/// s'applique jamais aux ressources tierces (et les cookies tiers ne sont plus
+/// filtrés). On s'appuie donc d'abord sur la frame de plus haut niveau, que
+/// CEF nous fournit toujours dans les rappels de requête.
+fn top_level_host(frame: Option<&Frame>) -> String {
+    let Some(frame) = frame else {
+        return String::new();
+    };
+    let mut current = frame.clone();
+    // Garde-fou : profondeur d'imbrication volontairement large.
+    for _ in 0..32 {
+        if current.is_main() != 0 {
+            break;
+        }
+        match current.parent() {
+            Some(parent) => current = parent,
+            None => break,
+        }
+    }
+    blocklist::host_of(&userfree_to_string(&current.url()))
+}
+
 /// Domaine « enregistrable » approximatif : les deux derniers labels de l'hôte
 /// (équivalent simplifié de eTLD+1, sans liste publique). Ex. `img.eff.org` →
 /// `eff.org`, `eff.org` → `eff.org`.
@@ -141,27 +200,38 @@ fn host_is_third_party(host: &str, first_party: &str) -> bool {
     registrable_domain(host) != registrable_domain(first_party)
 }
 
-/// Hôte du site principal (« first party ») associé à une requête.
-fn first_party_host(request: &Request) -> String {
+/// Hôte du site principal (« first party ») tel que rapporté par CEF pour la
+/// requête (peut être vide : voir `top_level_host`).
+fn request_first_party_host(request: &Request) -> String {
     let raw = request.first_party_for_cookies();
     blocklist::host_of(&userfree_to_string(&raw))
 }
 
-/// Vrai si la requête est « tierce partie » : son hôte diffère de celui du
-/// contexte de cookies (first party = site principal affiché).
-fn is_third_party_request(request: &Request) -> bool {
+/// Contexte « site » d'une requête : (document de plus haut niveau, valeur
+/// fournie par CEF). L'un des deux peut être vide.
+fn site_hosts(request: &Request, frame: Option<&Frame>) -> (String, String) {
+    (top_level_host(frame), request_first_party_host(request))
+}
+
+/// Vrai si la requête est « tierce partie » : son hôte diffère de celui du site
+/// affiché (document de plus haut niveau, sinon le contexte de cookies CEF).
+fn is_third_party_request(request: &Request, frame: Option<&Frame>) -> bool {
     let url = {
         let raw = request.url();
         userfree_to_string(&raw)
     };
-    host_is_third_party(&blocklist::host_of(&url), &first_party_host(request))
+    let (top, from_request) = site_hosts(request, frame);
+    let first_party = if top.is_empty() { from_request } else { top };
+    host_is_third_party(&blocklist::host_of(&url), &first_party)
 }
 
 /// Vrai si la protection est **désactivée pour le site courant**
 /// (« déblocage ponctuel ») : on n'applique alors ni le blocage réseau, ni le
 /// blocage des cookies tiers.
-fn is_exempt_request(request: &Request) -> bool {
-    blocklist::is_exempt(&first_party_host(request))
+fn is_exempt_request(request: &Request, frame: Option<&Frame>) -> bool {
+    let (top, from_request) = site_hosts(request, frame);
+    (!top.is_empty() && blocklist::is_exempt(&top))
+        || (!from_request.is_empty() && blocklist::is_exempt(&from_request))
 }
 
 // Filtre de cookies : refuse l'envoi/l'enregistrement des cookies tiers
@@ -173,28 +243,51 @@ wrap_cookie_access_filter! {
         fn can_send_cookie(
             &self,
             _browser: Option<&mut Browser>,
-            _frame: Option<&mut Frame>,
+            frame: Option<&mut Frame>,
             request: Option<&mut Request>,
             _cookie: Option<&Cookie>,
         ) -> ::std::os::raw::c_int {
-            match request {
-                Some(r) if !is_exempt_request(r) && is_third_party_request(r) => 0,
-                _ => 1,
+            let Some(r) = request else { return 1 };
+            // Protection suspendue : aucun filtrage des cookies tiers.
+            if blocklist::paused() {
+                return 1;
             }
+            let frame = frame.as_deref();
+            if !is_exempt_request(r, frame) && is_third_party_request(r, frame) {
+                let (top, fp) = site_hosts(r, frame);
+                diag(&format!(
+                    "COOKIE tiers non envoye {} (site={} cef={})",
+                    blocklist::host_of(&userfree_to_string(&r.url())),
+                    if top.is_empty() { "-" } else { &top },
+                    if fp.is_empty() { "-" } else { &fp },
+                ));
+                return 0;
+            }
+            1
         }
 
         fn can_save_cookie(
             &self,
             _browser: Option<&mut Browser>,
-            _frame: Option<&mut Frame>,
+            frame: Option<&mut Frame>,
             request: Option<&mut Request>,
             _response: Option<&mut Response>,
             _cookie: Option<&Cookie>,
         ) -> ::std::os::raw::c_int {
-            match request {
-                Some(r) if !is_exempt_request(r) && is_third_party_request(r) => 0,
-                _ => 1,
+            let Some(r) = request else { return 1 };
+            // Protection suspendue : aucun filtrage des cookies tiers.
+            if blocklist::paused() {
+                return 1;
             }
+            let frame = frame.as_deref();
+            if !is_exempt_request(r, frame) && is_third_party_request(r, frame) {
+                diag(&format!(
+                    "COOKIE tiers non enregistre {}",
+                    blocklist::host_of(&userfree_to_string(&r.url()))
+                ));
+                return 0;
+            }
+            1
         }
     }
 }
@@ -515,7 +608,7 @@ wrap_resource_request_handler! {
         fn on_before_resource_load(
             &self,
             _browser: Option<&mut Browser>,
-            _frame: Option<&mut Frame>,
+            frame: Option<&mut Frame>,
             request: Option<&mut Request>,
             _callback: Option<&mut Callback>,
         ) -> ReturnValue {
@@ -530,9 +623,50 @@ wrap_resource_request_handler! {
                     let raw = req.url();
                     CefStringUtf16::from(&raw).to_string()
                 };
-                if !is_exempt_request(req) && blocklist::should_block(&url) {
-                    blocklist::incr_blocked();
-                    return ReturnValue::CANCEL;
+                // Toute requete correspondant a une regle est journalisee (mode
+                // FARADAY_DIAG), meme si elle est finalement autorisee : c'est ce qui
+                // permet de verifier sans ambiguite le debocage par site ou la
+                // suspension temporaire de la protection.
+                if blocklist::matches_rules(&url) {
+                    let (top, fp) = site_hosts(req, frame.as_deref());
+                    let exempt = is_exempt_request(req, frame.as_deref());
+                    let paused = blocklist::paused();
+                    // Décision réelle : règles + réglage persistant + suspension,
+                    // puis déblocage éventuel du site affiché.
+                    let blocked = !exempt && blocklist::should_block(&url);
+                    let raison = if paused {
+                        "protection suspendue"
+                    } else if !blocklist::enabled() {
+                        "blocage desactive"
+                    } else if exempt {
+                        "site exempte"
+                    } else {
+                        "-"
+                    };
+                    diag(&format!(
+                        "RESEAU {} (site={} cef={} exempt={} raison={}) -> {}",
+                        blocklist::host_of(&url),
+                        if top.is_empty() { "-" } else { &top },
+                        if fp.is_empty() { "-" } else { &fp },
+                        if exempt { "oui" } else { "non" },
+                        raison,
+                        if blocked { "BLOQUE" } else { "AUTORISE" },
+                    ));
+                    if blocked {
+                        // Le blocage est attribue au site qui a declenche la requete
+                        // (premiere partie). Ainsi le compteur du bouclier tombe a 0
+                        // pour un site exempte, meme si la page fait charger d'autres
+                        // sites qui, eux, restent bloques.
+                        let site = if top.is_empty() { fp } else { top };
+                        blocklist::incr_blocked_for(&site);
+                        diag(&format!(
+                            "  compteurs : {} = {}, total = {}",
+                            if site.is_empty() { "-" } else { &site },
+                            blocklist::blocked_for(&site),
+                            blocklist::blocked_count()
+                        ));
+                        return ReturnValue::CANCEL;
+                    }
                 }
             }
 

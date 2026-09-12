@@ -8,6 +8,7 @@ use std::time::Instant;
 use cef::*;
 
 use crate::blocklist;
+use crate::bookmarks::Bookmarks;
 use crate::downloads::{
     DownloadEntry, DownloadNotice, DownloadNoticeKind, DownloadNotices, DownloadState, Downloads,
 };
@@ -254,6 +255,12 @@ pub struct FaradayChrome {
     address_bar_id: Option<egui::Id>,
     /// Menu contextuel (clic droit) ouvert sur la page.
     ctx_menu: Option<CtxMenu>,
+    /// Favoris (persistés dans %APPDATA%\Faraday\bookmarks.json).
+    bookmarks: Bookmarks,
+    /// Fenêtre « Favoris » ouverte.
+    show_bookmarks: bool,
+    /// Saisie du nom d'un nouveau profil (Paramètres).
+    new_profile: String,
 }
 
 impl FaradayChrome {
@@ -276,6 +283,7 @@ impl FaradayChrome {
         let search_engine = config.default_search_engine.clone();
         let downloads: Downloads = Arc::new(Mutex::new(Vec::new()));
         let notices: DownloadNotices = Arc::new(Mutex::new(Vec::new()));
+        let bookmarks = crate::bookmarks::load();
 
         let mut tabs: Vec<Tab> = session_data
             .tabs
@@ -321,6 +329,9 @@ impl FaradayChrome {
             page_focused: false,
             address_bar_id: None,
             ctx_menu: None,
+            bookmarks,
+            show_bookmarks: false,
+            new_profile: String::new(),
         }
     }
 
@@ -1125,6 +1136,120 @@ impl FaradayChrome {
         }
     }
 
+    /// Fenêtre flottante « Favoris ».
+    fn bookmarks_window(&mut self, ctx: &egui::Context) {
+        if !self.show_bookmarks {
+            return;
+        }
+        let mut open = true;
+        let mut go: Option<String> = None;
+        let mut remove: Option<String> = None;
+        let mut add_current = false;
+
+        egui::Window::new("Favoris")
+            .open(&mut open)
+            .default_width(480.0)
+            .default_height(400.0)
+            .collapsible(false)
+            .resizable(true)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.strong("Favoris");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new(icons::STAR)
+                                        .size(16.0)
+                                        .color(egui::Color32::from_rgb(255, 196, 0)),
+                                )
+                                .frame(false),
+                            )
+                            .on_hover_text("Ajouter la page affichée (Ctrl+D)")
+                            .clicked()
+                        {
+                            add_current = true;
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(2.0);
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let items = crate::bookmarks::list_of(&self.bookmarks);
+                    if items.is_empty() {
+                        ui.add_space(16.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                egui::RichText::new(
+                                    "Aucun favori. Cliquez sur l'étoile (Ctrl+D) pour ajouter la page affichée.",
+                                )
+                                .color(egui::Color32::from_gray(150)),
+                            );
+                        });
+                        return;
+                    }
+                    for b in &items {
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new(format!(
+                                            "{}  {}\n{}",
+                                            icons::BOOKMARK,
+                                            b.title,
+                                            b.url
+                                        ))
+                                        .size(12.0),
+                                    )
+                                    .frame(false),
+                                )
+                                .on_hover_text("Ouvrir ce favori")
+                                .clicked()
+                            {
+                                go = Some(b.url.clone());
+                            }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new(icons::TRASH).size(14.0),
+                                            )
+                                            .frame(false),
+                                        )
+                                        .on_hover_text("Retirer ce favori")
+                                        .clicked()
+                                    {
+                                        remove = Some(b.url.clone());
+                                    }
+                                },
+                            );
+                        });
+                        ui.separator();
+                    }
+                });
+            });
+
+        if let Some(url) = remove {
+            crate::bookmarks::remove(&self.bookmarks, &url);
+        }
+        if add_current {
+            let url = self.url.clone();
+            let title = crate::history::hostname(&url);
+            crate::bookmarks::toggle(&self.bookmarks, &title, &url);
+        }
+        if let Some(url) = go {
+            self.show_bookmarks = false;
+            self.navigate_to(&url);
+        }
+        if !open {
+            self.show_bookmarks = false;
+        }
+    }
+
     /// Fenêtre flottante « Téléchargements » : progression, annulation, dossier.
     fn downloads_window(&mut self, ctx: &egui::Context) {
         if !self.show_downloads {
@@ -1462,6 +1587,7 @@ impl FaradayChrome {
         let mut open = true;
         let mut reset = false;
         let mut save = false;
+        let mut profile_changed = false;
 
         egui::Window::new("Paramètres")
             .open(&mut open)
@@ -1481,6 +1607,32 @@ impl FaradayChrome {
                     )
                     .default_open(true)
                         .show(ui, |ui| {
+                            // Suspension temporaire : contrairement aux cases ci-dessous,
+                            // elle n'est PAS enregistree dans privacy.toml.
+                            let mut paused = blocklist::paused();
+                            if ui
+                                .checkbox(
+                                    &mut paused,
+                                    "Suspendre toute la protection (cette session seulement)",
+                                )
+                                .on_hover_text(
+                                    "Coupe le blocage des trackers, le filtre des cookies tiers et l'en-tête DNT, jusqu'au redémarrage.",
+                                )
+                                .changed()
+                            {
+                                blocklist::set_paused(paused);
+                            }
+                            if ui
+                                .button("Tester la protection sur EFF Cover Your Tracks")
+                                .clicked()
+                            {
+                                self.url = "https://coveryourtracks.eff.org".to_string();
+                                self.navigate();
+                                self.settings_open = false;
+                                self.page_focused = true;
+                                self.with_host(|host| host.set_focus(1));
+                            }
+                            ui.separator();
                             let mut changed = false;
                             changed |= ui
                                 .checkbox(
@@ -1593,6 +1745,116 @@ impl FaradayChrome {
                         ui.label(
                             egui::RichText::new(
                                 "« Système » suit automatiquement le mode clair/sombre de Windows.",
+                            )
+                            .size(11.0)
+                            .color(egui::Color32::from_gray(140)),
+                        );
+                    });
+                    ui.separator();
+
+                    // ===== Protection par site (déblocage ponctuel) =====
+                    let exempts = blocklist::exempt_list();
+                    egui::CollapsingHeader::new(
+                        egui::RichText::new(format!("{}  Protection par site", icons::WARNING))
+                            .size(15.0),
+                    )
+                    .default_open(!exempts.is_empty())
+                    .show(ui, |ui| {
+                        if exempts.is_empty() {
+                            ui.label(
+                                egui::RichText::new(
+                                    "Aucun site exempté : la protection est active partout.",
+                                )
+                                .size(11.0)
+                                .color(egui::Color32::from_gray(140)),
+                            );
+                        } else {
+                            ui.label(
+                                egui::RichText::new(
+                                    "Protection DÉSACTIVÉE pour ces domaines (et leurs sous-domaines) :",
+                                )
+                                .size(12.0),
+                            );
+                            let mut to_remove: Option<String> = None;
+                            for host in &exempts {
+                                ui.horizontal(|ui| {
+                                    ui.label(host);
+                                    if ui
+                                        .small_button(icons::TRASH)
+                                        .on_hover_text("Réactiver la protection pour ce site")
+                                        .clicked()
+                                    {
+                                        to_remove = Some(host.clone());
+                                    }
+                                });
+                            }
+                            if let Some(host) = to_remove {
+                                blocklist::set_exempt(&host, false);
+                                blocklist::save_exceptions();
+                            }
+                        }
+                        ui.label(
+                            egui::RichText::new(
+                                "Le bouton (bouclier / attention) de la barre d'outils bascule la protection du site affiché.",
+                            )
+                            .size(11.0)
+                            .color(egui::Color32::from_gray(140)),
+                        );
+                    });
+                    ui.separator();
+
+                    // ===== Profil (données isolées) =====
+                    egui::CollapsingHeader::new(
+                        egui::RichText::new(format!(
+                            "{}  Profil : {}",
+                            icons::HOUSE,
+                            crate::profiles::active_name()
+                        ))
+                        .size(15.0),
+                    )
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Profil :");
+                            for name in crate::profiles::list() {
+                                let active = name == crate::profiles::active_name();
+                                if ui.selectable_label(active, name.as_str()).clicked() && !active {
+                                    crate::profiles::set_active(&name);
+                                    profile_changed = true;
+                                }
+                                if !active
+                                    && ui
+                                        .small_button(icons::TRASH)
+                                        .on_hover_text("Supprimer ce profil et ses données")
+                                        .clicked()
+                                {
+                                    crate::profiles::remove(&name);
+                                }
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Nouveau :");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.new_profile)
+                                    .desired_width(160.0)
+                                    .hint_text("ex. Travail"),
+                            );
+                            if ui.button("Créer").clicked() && crate::profiles::create(&self.new_profile)
+                            {
+                                crate::profiles::set_active(&self.new_profile);
+                                self.new_profile.clear();
+                                profile_changed = true;
+                            }
+                        });
+                        if profile_changed {
+                            ui.colored_label(
+                                egui::Color32::from_rgb(255, 176, 32),
+                                "Redémarre Faraday pour appliquer ce profil.",
+                            );
+                        }
+                        ui.label(
+                            egui::RichText::new(
+                                "Chaque profil a ses propres onglets, historique, favoris, exceptions et cache. Changer de profil nécessite un redémarrage.",
                             )
                             .size(11.0)
                             .color(egui::Color32::from_gray(140)),
@@ -1836,13 +2098,15 @@ impl eframe::App for FaradayChrome {
 
         // Raccourcis clavier du chrome (avant tout envoi à la page).
         {
-            let (t, l, h, j) = ctx.input(|i| {
+            let (t, l, h, j, b, d) = ctx.input(|i| {
                 let c = i.modifiers.ctrl;
                 (
                     c && i.key_pressed(egui::Key::T),
                     c && i.key_pressed(egui::Key::L),
                     c && i.key_pressed(egui::Key::H),
                     c && i.key_pressed(egui::Key::J),
+                    c && i.key_pressed(egui::Key::B),
+                    c && i.key_pressed(egui::Key::D),
                 )
             });
             if t {
@@ -1853,6 +2117,17 @@ impl eframe::App for FaradayChrome {
             }
             if j {
                 self.show_downloads = !self.show_downloads;
+            }
+            if b {
+                self.show_bookmarks = !self.show_bookmarks;
+            }
+            if d {
+                // Ctrl+D : bascule le favori de la page affichée.
+                let url = self.url.clone();
+                if !url.trim().is_empty() {
+                    let title = crate::history::hostname(&url);
+                    crate::bookmarks::toggle(&self.bookmarks, &title, &url);
+                }
             }
             if l {
                 if let Some(id) = self.address_bar_id {
@@ -1916,7 +2191,7 @@ impl eframe::App for FaradayChrome {
                     // Barre d'adresse : occupe l'espace restant après les
                     // boutons fixes de droite (Tél. + Hist. + Régl. + Aller +
                     // site + favoris + bouclier).
-                    let addr_w = (ui.available_width() - 312.0).max(80.0);
+                    let addr_w = (ui.available_width() - 346.0).max(80.0);
                     let addr = ui.add_sized(
                         [addr_w, 30.0],
                         egui::TextEdit::singleline(&mut self.url)
@@ -1934,6 +2209,33 @@ impl eframe::App for FaradayChrome {
                         self.page_focused = true;
                         self.with_host(|host| host.set_focus(1));
                     }
+
+                    // Étoile : ajoute/retire la page courante des favoris.
+                    let page_url = self.url.clone();
+                    let bookmarked = !page_url.trim().is_empty()
+                        && crate::bookmarks::contains(&self.bookmarks, &page_url);
+                    let star_color = if bookmarked {
+                        egui::Color32::from_rgb(255, 196, 0)
+                    } else {
+                        egui::Color32::from_gray(170)
+                    };
+                    let star = ui.add(
+                        egui::Button::new(
+                            egui::RichText::new(icons::STAR).size(18.0).color(star_color),
+                        )
+                        .min_size(egui::vec2(30.0, 30.0)),
+                    );
+                    let star_tip = if bookmarked {
+                        "Retirer des favoris (Ctrl+D)"
+                    } else {
+                        "Ajouter aux favoris (Ctrl+D)"
+                    };
+                    if star.on_hover_text(star_tip).clicked() {
+                        let title = crate::history::hostname(&page_url);
+                        crate::bookmarks::toggle(&self.bookmarks, &title, &page_url);
+                    }
+
+                    ui.add_space(4.0);
 
                     // Bouton Aller (compact, icône flèche).
                     let go = ui.add(
@@ -1975,6 +2277,21 @@ impl eframe::App for FaradayChrome {
                         blocklist::set_exempt(&site_host, !site_exempt);
                         blocklist::save_exceptions();
                         self.reload();
+                    }
+
+                    ui.add_space(4.0);
+
+                    // Favoris (fenêtre flottante).
+                    let bm_count = crate::bookmarks::list_of(&self.bookmarks).len();
+                    let bms = ui.add(
+                        egui::Button::new(egui::RichText::new(icons::BOOKMARKS).size(18.0))
+                            .min_size(egui::vec2(30.0, 30.0)),
+                    );
+                    if bms
+                        .on_hover_text(format!("Favoris ({bm_count}) (Ctrl+B)"))
+                        .clicked()
+                    {
+                        self.show_bookmarks = !self.show_bookmarks;
                     }
 
                     ui.add_space(4.0);
@@ -2042,40 +2359,86 @@ impl eframe::App for FaradayChrome {
                     ui.add_space(4.0);
 
                     // Bouclier privacy : compteur de blocages en direct.
-                    let blocked = blocklist::blocked_count();
+                    // Le compteur affiche les blocages **du site affiché** : il
+                    // tombe à zéro dès que la protection y est désactivée, même si
+                    // d'autres sites chargés par la page bloquent encore (détail
+                    // dans l'infobulle).
+                    let current_host = blocklist::normalize_host(&self.url);
+                    let site_exempt =
+                        !current_host.is_empty() && blocklist::is_exempt(&current_host);
+                    let blocked_here = blocklist::blocked_for(&current_host);
+                    let blocked_total = blocklist::blocked_count();
+                    let blocked = if current_host.is_empty() {
+                        blocked_total
+                    } else {
+                        blocked_here
+                    };
                     let protection = blocklist::enabled();
-                    let shield_color = if protection {
+                    let paused = blocklist::paused();
+                    let protected_here = protection && !site_exempt && !paused;
+                    // Vert = protégé ici ; orange = protection levée (pour ce site ou
+                    // globalement) ; gris = réglage persistant désactivé.
+                    let shield_color = if protected_here {
                         egui::Color32::from_rgb(52, 199, 89)
+                    } else if protection {
+                        egui::Color32::from_rgb(255, 176, 32)
                     } else {
                         egui::Color32::from_gray(150)
                     };
-                    let shield_fill = if protection {
+                    let shield_fill = if protected_here {
                         egui::Color32::from_rgba_unmultiplied(52, 199, 89, 25)
+                    } else if protection {
+                        egui::Color32::from_rgba_unmultiplied(255, 176, 32, 25)
                     } else {
                         egui::Color32::from_rgba_unmultiplied(150, 150, 150, 20)
                     };
                     let shield = ui.add(
                         egui::Button::new(
-                            egui::RichText::new(format!("{} {blocked}", icons::SHIELD_CHECK))
-                                .color(shield_color)
-                                .strong()
-                                .size(16.0),
+                            egui::RichText::new(if paused {
+                                format!("{} off", icons::SHIELD_CHECK)
+                            } else {
+                                format!("{} {blocked}", icons::SHIELD_CHECK)
+                            })
+                            .color(shield_color)
+                            .strong()
+                            .size(16.0),
                         )
                         .min_size(egui::vec2(44.0, 30.0))
                         .fill(shield_fill),
                     );
-                    let tip = if !protection {
+                    let mut tip = if paused {
+                        "Protection SUSPENDUE pour cette session : aucun blocage, cookies tiers autorisés et plus d'en-tête DNT.".to_string()
+                    } else if !protection {
                         "Protection anti-tracking désactivée (Paramètres).".to_string()
+                    } else if site_exempt {
+                        format!(
+                            "Protection DÉSACTIVÉE pour {current_host} : aucune requête n'est bloquée sur ce site."
+                        )
                     } else if blocked == 0 {
-                        "Aucune requête de tracking bloquée - Faraday protège votre vie privée."
+                        "Aucune requête de tracking bloquée sur ce site - Faraday protège votre vie privée."
                             .to_string()
                     } else {
                         format!(
-                            "{blocked} requête{} de tracking bloquée{} - Faraday protège votre vie privée.",
+                            "{blocked} requête{} de tracking bloquée{} sur ce site.",
                             if blocked > 1 { "s" } else { "" },
                             if blocked > 1 { "s" } else { "" }
                         )
                     };
+                    tip.push_str(&format!("\nTotal depuis le lancement : {blocked_total}"));
+                    if !current_host.is_empty() {
+                        let others: Vec<String> = blocklist::blocked_sites()
+                            .into_iter()
+                            .filter(|(h, _)| *h != current_host)
+                            .take(3)
+                            .map(|(h, n)| format!("{h} ({n})"))
+                            .collect();
+                        if !others.is_empty() {
+                            tip.push_str(&format!(
+                                "\nBlocages venant d'autres sites : {}",
+                                others.join(", ")
+                            ));
+                        }
+                    }
                     let sandbox_state =
                         if crate::SANDBOX_ACTIVE.load(std::sync::atomic::Ordering::Relaxed) {
                             "Sandbox Chromium : ACTIF (isolation des processus)"
@@ -2084,14 +2447,13 @@ impl eframe::App for FaradayChrome {
                         };
                     if shield
                         .on_hover_text(format!(
-                            "{tip}\n{sandbox_state}\nCliquer : tester sur EFF Cover Your Tracks."
+                            "{tip}\n{sandbox_state}\nCliquer : {} la protection (temporaire).",
+                            if paused { "réactiver" } else { "suspendre" }
                         ))
                         .clicked()
                     {
-                        self.url = "https://coveryourtracks.eff.org".to_string();
-                        self.navigate();
-                        self.page_focused = true;
-                        self.with_host(|host| host.set_focus(1));
+                        // Suspension globale en un clic (réversible, non enregistrée).
+                        blocklist::set_paused(!paused);
                     }
                 });
             });
@@ -2138,8 +2500,9 @@ impl eframe::App for FaradayChrome {
             self.forward_input(ctx, rect, &response);
         });
 
-        // Fenêtres flottantes (historique, téléchargements, paramètres).
+        // Fenêtres flottantes (historique, favoris, téléchargements, paramètres).
         self.history_window(ctx);
+        self.bookmarks_window(ctx);
         self.downloads_window(ctx);
         self.settings_window(ctx);
 

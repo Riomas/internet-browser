@@ -74,10 +74,9 @@ impl Default for PrivacyConfig {
     }
 }
 
-/// Répertoire des données Faraday dans `%APPDATA%`.
+/// Répertoire des données Faraday (celui du **profil actif**).
 pub fn appdata_dir() -> PathBuf {
-    let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(base).join("Faraday")
+    crate::profiles::active_dir()
 }
 
 /// Chemin du fichier de configuration utilisateur (`%APPDATA%\Faraday\privacy.toml`).
@@ -126,6 +125,11 @@ impl PrivacyConfig {
     pub fn apply_runtime(&self) {
         blocklist::set_enabled(self.enable_tracker_blocking);
         blocklist::set_dnt(self.enable_do_not_track);
+        // Démarrage volontairement sans protection (dépannage, banc de test) :
+        // `FARADAY_PAUSE=1` suspend tout pour la session en cours.
+        if std::env::var_os("FARADAY_PAUSE").is_some() {
+            blocklist::set_paused(true);
+        }
     }
 
     /// Persiste la configuration utilisateur dans `%APPDATA%\Faraday\privacy.toml`.

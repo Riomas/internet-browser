@@ -11,6 +11,7 @@
 //! Le `RequestHandler` demande à ce moteur s'il doit bloquer une URL ; un
 //! compteur global permet d'afficher le nombre de blocages sur le bouclier.
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Mutex;
 use std::sync::OnceLock;
@@ -25,14 +26,68 @@ static ENABLED: AtomicBool = AtomicBool::new(true);
 /// L'en-tête Do Not Track (`DNT: 1`) est-il envoyé ?
 static DNT: AtomicBool = AtomicBool::new(true);
 
+/// Protection **suspendue temporairement** (session en cours uniquement).
+///
+/// Contrairement à `ENABLED` (réglage persistant de `privacy.toml`), cette pause
+/// n'est jamais enregistrée : elle est remise à zéro au redémarrage. Elle coupe
+/// tout ce que Faraday fait : blocage réseau, filtre de cookies tiers et en-tête
+/// Do Not Track — utile pour dépanner un site ou comparer avec/sans protection.
+static PAUSED: AtomicBool = AtomicBool::new(false);
+
 /// Nombre de requêtes bloquées depuis le démarrage.
 pub fn blocked_count() -> u64 {
     BLOCKED.load(Ordering::Relaxed)
 }
 
-/// Incrémente le compteur de blocages (appelé quand on refuse une requête).
-pub fn incr_blocked() {
+// ---------------------------------------------------------------------------
+// Blocages par site
+//
+// Le compteur global ne suffit pas à comprendre ce qui se passe : sur une page
+// comme le test EFF Cover Your Tracks, une partie des requêtes vient **d'autres
+// sites** (le test charge ses simulateurs depuis plusieurs domaines). En
+// attribuant chaque blocage à son site, on peut afficher « 0 blocage sur ce
+// site » quand la protection y est désactivée, et montrer d'où viennent les
+// blocages restants.
+// ---------------------------------------------------------------------------
+
+/// Compteur de blocages par site visité (première partie à l'origine).
+static BY_SITE: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+
+/// Nombre maximum de sites suivis (borne la mémoire sur une longue session).
+const MAX_TRACKED_SITES: usize = 256;
+
+fn by_site() -> &'static Mutex<HashMap<String, u64>> {
+    BY_SITE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Incrémente le compteur global **et** le compteur du site concerné.
+pub fn incr_blocked_for(site: &str) {
     BLOCKED.fetch_add(1, Ordering::Relaxed);
+    let key = normalize_host(site);
+    if key.is_empty() {
+        return;
+    }
+    let mut map = by_site().lock().unwrap();
+    if map.len() < MAX_TRACKED_SITES || map.contains_key(&key) {
+        *map.entry(key).or_insert(0) += 1;
+    }
+}
+
+/// Blocages comptés pour un site donné (`0` s'il n'en a déclenché aucun).
+pub fn blocked_for(site: &str) -> u64 {
+    let key = normalize_host(site);
+    if key.is_empty() {
+        return 0;
+    }
+    by_site().lock().unwrap().get(&key).copied().unwrap_or(0)
+}
+
+/// Blocages par site, du plus élevé au plus faible (affiché dans l'infobulle).
+pub fn blocked_sites() -> Vec<(String, u64)> {
+    let map = by_site().lock().unwrap();
+    let mut list: Vec<(String, u64)> = map.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    list.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    list
 }
 
 /// Le blocage des trackers est-il actif ?
@@ -45,9 +100,19 @@ pub fn set_enabled(value: bool) {
     ENABLED.store(value, Ordering::Relaxed);
 }
 
+/// La protection est-elle suspendue pour cette session ?
+pub fn paused() -> bool {
+    PAUSED.load(Ordering::Relaxed)
+}
+
+/// Suspend/relance **toute** la protection (blocage, cookies tiers, DNT).
+pub fn set_paused(value: bool) {
+    PAUSED.store(value, Ordering::Relaxed);
+}
+
 /// L'en-tête Do Not Track doit-il être envoyé ?
 pub fn dnt_enabled() -> bool {
-    DNT.load(Ordering::Relaxed)
+    !paused() && DNT.load(Ordering::Relaxed)
 }
 
 /// Active/désactive l'envoi de l'en-tête Do Not Track (en direct).
@@ -269,9 +334,17 @@ pub fn host_of(url: &str) -> String {
 
 /// Décide si une URL doit être bloquée (liste de règles) ou non.
 pub fn should_block(url: &str) -> bool {
-    if !enabled() {
+    if !enabled() || paused() {
         return false;
     }
+    let host = host_of(url);
+    list().blocks(&host)
+}
+
+/// Vrai si l'URL correspond à une règle de blocage, **indépendamment** du
+/// réglage persistant et de la suspension. Sert au journal de diagnostic : on
+/// peut ainsi voir une requête autorisée (site exempté, protection suspendue).
+pub fn matches_rules(url: &str) -> bool {
     let host = host_of(url);
     list().blocks(&host)
 }
@@ -355,5 +428,40 @@ mod tests {
         set_exempt("banque.fr", false);
         assert!(!is_exempt("banque.fr"));
         assert!(exempt_list().is_empty());
+    }
+
+    #[test]
+    fn pause_suspends_everything() {
+        // La suspension temporaire coupe le blocage et l'en-tete DNT, sans
+        // toucher au reglage persistant (`enabled`).
+        assert!(should_block("https://www.google-analytics.com/collect?v=1"));
+        assert!(dnt_enabled());
+        set_paused(true);
+        assert!(paused());
+        assert!(!should_block("https://www.google-analytics.com/collect?v=1"));
+        assert!(!should_block("https://trackersimulator.org/x.js"));
+        assert!(!dnt_enabled());
+        assert!(enabled()); // le reglage persistant n'est pas modifie
+        set_paused(false);
+        assert!(!paused());
+        assert!(should_block("https://trackersimulator.org/x.js"));
+        assert!(dnt_enabled());
+    }
+
+    #[test]
+    fn blocks_are_counted_per_site() {
+        // Chaque blocage est attribue au site (premiere partie) qui l'a declenche.
+        assert_eq!(blocked_for("site-a.exemple-faraday.test"), 0);
+        incr_blocked_for("site-a.exemple-faraday.test");
+        incr_blocked_for("site-a.exemple-faraday.test");
+        incr_blocked_for("https://www.site-a.exemple-faraday.test/page");
+        incr_blocked_for("site-b.exemple-faraday.test");
+        assert_eq!(blocked_for("site-a.exemple-faraday.test"), 3);
+        assert_eq!(blocked_for("www.site-a.exemple-faraday.test"), 3);
+        assert_eq!(blocked_for("site-b.exemple-faraday.test"), 1);
+        assert_eq!(blocked_for(""), 0);
+        assert_eq!(blocked_for("site-inconnu.exemple-faraday.test"), 0);
+        let sites = blocked_sites();
+        assert!(sites.iter().any(|(h, n)| h == "site-a.exemple-faraday.test" && *n == 3));
     }
 }

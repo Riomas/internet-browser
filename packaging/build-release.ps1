@@ -8,9 +8,17 @@
     .\packaging\build-release.ps1 -Sandbox            # active le sandbox Chromium (cef/sandbox)
     .\packaging\build-release.ps1 -SkipBuild          # regroupe seulement (dist deja present)
     .\packaging\build-release.ps1 -Inno               # tente aussi l'installateur Inno (ISCC requis)
-    .\packaging\build-release.ps1 -CertPath my.pfx -CertPass "***"   # signe les .exe apres build
+    .\packaging\build-release.ps1 -Inno -CertPath my.pfx -CertPass "***"   # signe l'installateur
+    .\packaging\build-release.ps1 -Inno -CertPath my.pfx -CertPass "***" -SignAppFiles
+                                                       # signe AUSSI le lot applicatif
+                                                       # (certificat approuve REQUIS sur la cible)
 
   Pre-requis : Rust stable (MSVC) + CMake + Ninja, variable CEF_PATH positionnee.
+
+  Note signature : le bootstrap CEF ne demarre que si faraday.exe, chrome_elf.dll et
+  faraday.dll sont SOIT tous non signes, SOIT tous signes par le meme certificat
+  approuve sur la machine cible. libcef.dll (fourni par CEF) n'etant pas signe, la
+  signature du lot applicatif n'est pas faite par defaut (voir docs/SIGNATURE.md).
 #>
 [CmdletBinding()]
 param(
@@ -18,7 +26,8 @@ param(
     [switch]$SkipBuild,
     [switch]$Inno,
     [string]$CertPath = "",
-    [string]$CertPass = ""
+    [string]$CertPass = "",
+    [switch]$SignAppFiles
 )
 
 $ErrorActionPreference = "Stop"
@@ -143,10 +152,17 @@ $sizeMb = [math]::Round((Get-ChildItem $stage -Recurse -File | Measure-Object Le
 Write-Host "==> App regroupee dans : $stage"
 Write-Host "    (taille : $sizeMb Mo)"
 
-# --- 3) Signature des binaires (AVANT zip et installateur) -------------------
-# On signe faraday.exe / faraday_helper.exe dans le dossier regroupe AVANT de
-# creer le zip et l'installateur, afin que ces derniers contiennent bien les
-# binaires signes. L'installateur sera signe apres sa compilation (section 5).
+# Nettoyage : journaux laisses par des executions precedentes (diagnostic CEF
+# debug.log, faraday-startup.log...). Ils ne font pas partie de la distribution.
+Get-ChildItem $stage -Filter "*.log" -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.DirectoryName -eq $stage } |
+    ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
+
+# --- 3) Signature (AVANT zip et installateur) --------------------------------
+# Installateur : toujours signe s'il y a un certificat (aucune contrainte CEF).
+# Lot applicatif : signe uniquement avec -SignAppFiles, car bootstrap.exe (CEF)
+# exige un lot homogene ET un certificat approuve sur la machine cible. Un lot
+# signe par un certificat non approuve ne demarre PAS (voir docs/SIGNATURE.md).
 $signtool = $null
 if ($CertPath) {
     $signtool = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source
@@ -182,11 +198,30 @@ function Invoke-FaradaySign {
 }
 
 if ($signtool) {
-    $toSign = @("faraday.exe", "faraday_helper.exe")
-    if (Test-Path (Join-Path $stage "faraday.dll")) { $toSign += "faraday.dll" }
-    foreach ($exe in $toSign) {
-        $p = Join-Path $stage $exe
-        if (Test-Path $p) { Invoke-FaradaySign $p } else { Write-Warning "absent, non signe : $exe" }
+    if ($SignAppFiles) {
+        # CEF impose le MEME certificat pour faraday.exe, chrome_elf.dll et
+        # faraday.dll (ou aucun des trois). chrome_elf.dll est donc signe aussi.
+        $toSign = @("faraday.exe", "faraday_helper.exe", "chrome_elf.dll")
+        if (Test-Path (Join-Path $stage "faraday.dll")) { $toSign += "faraday.dll" }
+        foreach ($exe in $toSign) {
+            $p = Join-Path $stage $exe
+            if (Test-Path $p) { Invoke-FaradaySign $p } else { Write-Warning "absent, non signe : $exe" }
+        }
+        Write-Warning "Lot applicatif signe : le certificat DOIT etre approuve sur la machine cible (docs/SIGNATURE.md)."
+    } else {
+        Write-Host "==> Lot applicatif : NON signe (mode par defaut, requis par bootstrap.exe)"
+        Write-Host "    CEF exige faraday.exe + chrome_elf.dll + faraday.dll TOUS signes par le"
+        Write-Host "    meme certificat approuve, ou TOUS non signes. libcef.dll etant livre par"
+        Write-Host "    CEF sans signature, un lot partiellement signe (ou signe par un certificat"
+        Write-Host "    non approuve sur la cible) ne demarre pas."
+        Write-Host "    Pour signer malgre tout : -SignAppFiles (avec certificat de confiance)."
+    }
+    # Certificat public a cote des artefacts (utile pour un certificat auto-signe).
+    $cer = [System.IO.Path]::ChangeExtension($CertPath, ".cer")
+    if (Test-Path $cer) {
+        $cerOut = Join-Path $distOut "Faraday-$version-certificat.cer"
+        Copy-Item $cer $cerOut -Force
+        Write-Host "==> Certificat public copie : $cerOut"
     }
 }
 

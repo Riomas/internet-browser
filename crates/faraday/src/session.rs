@@ -21,10 +21,9 @@ pub struct SessionData {
     pub history: Vec<HistoryEntry>,
 }
 
-/// Répertoire des données de session dans %APPDATA%.
+/// Répertoire des données de session (celui du **profil actif**).
 fn session_dir() -> PathBuf {
-    let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(base).join("Faraday")
+    crate::profiles::active_dir()
 }
 
 fn session_file() -> PathBuf {

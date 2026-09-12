@@ -61,6 +61,10 @@ pub const GITHUB_LOGO: &str = "\u{E576}";
 pub const CERTIFICATE: &str = "\u{E766}";
 /// Signet (favoris / archive).
 pub const BOOKMARK: &str = "\u{E0E8}";
+/// Étoile (favori de la page courante).
+pub const STAR: &str = "\u{E46A}";
+/// Liste de favoris.
+pub const BOOKMARKS: &str = "\u{E0EC}";
 
 const PHOSPHOR_TTF: &[u8] = include_bytes!("../resources/fonts/Phosphor.ttf");
 

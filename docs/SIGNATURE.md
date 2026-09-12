@@ -26,33 +26,53 @@
 
 | Fichier | Pourquoi |
 |---|---|
-| `faraday.exe` | Exécutable principal |
-| `faraday_helper.exe` | Processus enfant CEF (soumis aux mêmes politiques) |
+| `faraday.exe` | Initialise le processus Chromium (`bootstrap.exe` de CEF) |
+| `faraday.dll` | Code de l'application (variante sandbox) |
+| `faraday_helper.exe` | Processus enfant CEF |
+| `chrome_elf.dll` | Préchargé par le bootstrap : **contrôlé** pour la signature |
 | `Faraday-Setup-0.1.0-x64.exe` | Installateur (évite l'alerte « Éditeur inconnu ») |
+
+> ⚠️ **Contrainte CEF (à connaitre absolument)** : au démarrage, `bootstrap.exe` vérifie la
+> signature de `faraday.exe`, puis de `chrome_elf.dll`, puis de `faraday.dll`. La règle est
+> binaire :
+>
+> - **soit tous non signés** → démarrage normal ;
+> - **soit tous signés par le même certificat, et ce certificat approuvé sur la machine
+>   cible** → démarrage normal ;
+> - tout autre cas → le bootstrap **refuse de démarrer** : aucune fenêtre ne s'ouvre et un
+>   `debug.log` apparaît à côté de `faraday.exe` avec
+>   `Failed <chemin> certificate checks: WinVerifyTrust failed`.
+>
+> C'est pour cela que la stratégie par défaut de Faraday est : **lot applicatif non signé**
+> (démarre partout, même sur une machine vierge) **+ installateur signé**. `libcef.dll`,
+> fourni par CEF, restant non signé, le lot ne peut de toute façon pas être « intégralement »
+> signé par le même certificat.
 
 > Le `.zip` portable **ne peut pas être signé** (ce n'est pas un fichier PE) → on fournit
 > un **`SHA256SUMS.txt`** pour vérifier l'intégrité.
 
 **Ordre correct** (déjà implémenté dans `packaging/build-release.ps1`) :
-`faraday.exe` + `faraday_helper.exe` **(signés) → zip + installateur → installateur signé`.
+`cargo build` → `dist\Faraday\` → *(signature du lot si `-SignAppFiles`)* → zip portable →
+installateur compilé puis **signé** → `SHA256SUMS.txt`.
 
 ---
 
 ## 3. Signer avec le script (recommandé)
 
 ```powershell
-# Depuis la racine du dépôt
+# Depuis la racine du dépôt (installateur signé, lot applicatif non signé : voir §2)
 .\packaging\build-release.ps1 -Inno -CertPath "C:\chemin\mon-certificat.pfx" -CertPass "motdepasse"
 ```
 
 Le script :
-1. compile en Release (+ helper),
+1. compile en Release (+ helper, + DLL en mode sandbox),
 2. regroupe l'application dans `dist\Faraday\`,
-3. **signe** `faraday.exe` et `faraday_helper.exe` (SHA-256 + horodatage DigiCert),
-4. **vérifie** chaque signature (`signtool verify /pa`),
-5. crée le zip portable,
-6. compile l'installateur Inno et **le signe**,
-7. écrit `dist\SHA256SUMS.txt`.
+3. signe le **lot applicatif** *uniquement* avec `-SignAppFiles` (`faraday.exe`,
+   `faraday.dll`, `faraday_helper.exe`, **`chrome_elf.dll`** — voir la contrainte §2),
+4. crée le zip portable,
+5. compile l'installateur Inno et **le signe** (avec vérification `signtool verify /pa`),
+6. écrit `dist\SHA256SUMS.txt` et copie le certificat public (`certs\*.cer`) à côté des
+   artefacts quand il existe.
 
 > `signtool.exe` est repéré automatiquement (PATH, puis Windows Kits).
 > Si le certificat est un **token/HSM**, utilise plutôt `/sha1 <thumbprint>` (voir §5).
@@ -62,11 +82,15 @@ Le script :
 ## 4. Vérifier une signature
 
 ```powershell
-signtool verify /pa /v "dist\Faraday\faraday.exe"
-Get-AuthenticodeSignature "dist\Faraday\faraday.exe" | Format-List Status, SignerCertificate
+# L'installateur est toujours signé
+signtool verify /pa /v "dist\Faraday-Setup-0.1.0-x64.exe"
+Get-AuthenticodeSignature "dist\Faraday-Setup-0.1.0-x64.exe" | Format-List Status, SignerCertificate
+
+# Le lot applicatif : "NotSigned" par défaut (voir §2), ou "Valid" avec -SignAppFiles
+Get-AuthenticodeSignature "dist\Faraday\faraday.exe" | Format-List Status
 ```
 
-Attendu : `Status = Valid`, avec le nom de ton organisation comme signataire.
+Attendu : `Status = Valid` sur l'installateur, avec le nom de ton organisation comme signataire.
 
 ---
 
@@ -81,7 +105,7 @@ Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Select-Object Subject, Thu
 
 # Signature via le magasin (token inséré)
 signtool sign /sha1 <THUMBPRINT> /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
-  "dist\Faraday\faraday.exe"
+  "dist\Faraday-Setup-0.1.0-x64.exe"
 ```
 
 *(Le script propose `-CertPath` ; pour un token, on peut aussi exporter un `.pfx` non exportable
@@ -110,7 +134,7 @@ Pour valider toute la chaîne **sans acheter de certificat** :
 # 1) Créer un certificat de test (magasin utilisateur, aucun droit admin)
 .\packaging\make-testcert.ps1 -Trust      # -Trust ajoute le cert aux magasins de confiance utilisateur
 
-# 2) Signer avec ce certificat de test
+# 2) Build + installateur signe (le lot applicatif reste non signe : voir §2)
 .\packaging\build-release.ps1 -Inno -CertPath .\certs\faraday-test.pfx -CertPass "faraday-test"
 
 # 3) Nettoyer (supprimer le certificat de test de la machine)
@@ -120,6 +144,27 @@ Pour valider toute la chaîne **sans acheter de certificat** :
 > ⚠️ Rappel : signé avec un certificat auto-signé, Faraday **restera bloqué par Smart App
 > Control** sur cette machine. Le but est de prouver que la signature fonctionne
 > (le pipeline) avant d'investir. La confiance réelle viendra d'un certificat d'AC (§1).
+
+### Signer aussi le lot applicatif (cas particulier)
+
+Depuis le passage au sandbox Chromium (CEF M138+), signer `faraday.exe` **sans** que le
+certificat soit approuvé sur la machine de test **empêche le démarrage** (règle détaillée au
+§2). Si vous voulez tester cette configuration :
+
+```powershell
+# 1) Le certificat doit être approuvé sur la machine de test :
+#    - hôte : .\packaging\make-testcert.ps1 -Trust
+#    - Windows Sandbox (machine vierge) : importer le certificat public AVANT de lancer
+Import-Certificate -FilePath C:\FaradayApp\..\Faraday-0.1.0-certificat.cer `
+                   -CertStoreLocation Cert:\LocalMachine\Root
+
+# 2) Construire avec le lot applicatif signe
+.\packaging\build-release.ps1 -Sandbox -Inno -SignAppFiles `
+    -CertPath .\certs\faraday-test.pfx -CertPass "faraday-test"
+```
+
+> En cas de doute : laissez le **lot applicatif non signé** (option par défaut). C'est la
+> configuration qui démarre partout, y compris sur une machine vierge.
 
 ---
 
