@@ -40,6 +40,9 @@ pub fn browser_main(windows_sandbox_info: *mut u8) -> anyhow::Result<()> {
 
     win::load_cef();
 
+    // Exceptions par site (« déblocage ponctuel ») : chargées avant CEF.
+    blocklist::load_exceptions();
+
     let args = cef::args::Args::new();
     let Some(cmd_line) = args.as_cmd_line() else {
         anyhow::bail!("Impossible de parser les arguments de la ligne de commande");

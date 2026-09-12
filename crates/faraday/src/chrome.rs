@@ -1915,8 +1915,8 @@ impl eframe::App for FaradayChrome {
 
                     // Barre d'adresse : occupe l'espace restant après les
                     // boutons fixes de droite (Tél. + Hist. + Régl. + Aller +
-                    // bouclier).
-                    let addr_w = (ui.available_width() - 240.0).max(80.0);
+                    // site + favoris + bouclier).
+                    let addr_w = (ui.available_width() - 312.0).max(80.0);
                     let addr = ui.add_sized(
                         [addr_w, 30.0],
                         egui::TextEdit::singleline(&mut self.url)
@@ -1944,6 +1944,37 @@ impl eframe::App for FaradayChrome {
                         self.navigate();
                         self.page_focused = true;
                         self.with_host(|host| host.set_focus(1));
+                    }
+
+                    ui.add_space(4.0);
+
+                    // Protection par site (« déblocage ponctuel »).
+                    let site_host = blocklist::normalize_host(&self.url);
+                    let site_exempt = !site_host.is_empty() && blocklist::is_exempt(&site_host);
+                    let (site_icon, site_color) = if site_exempt {
+                        (icons::WARNING, egui::Color32::from_rgb(255, 176, 32))
+                    } else {
+                        (icons::SHIELD_CHECK, egui::Color32::from_rgb(52, 199, 89))
+                    };
+                    let site_btn = ui.add(
+                        egui::Button::new(
+                            egui::RichText::new(site_icon).size(18.0).color(site_color),
+                        )
+                        .min_size(egui::vec2(30.0, 30.0)),
+                    );
+                    let site_tip = if site_host.is_empty() {
+                        "Protection par site : ouvrez un site pour l'ajuster.".to_string()
+                    } else if site_exempt {
+                        format!("Protection DÉSACTIVÉE pour {site_host} - cliquer pour réactiver.")
+                    } else {
+                        format!(
+                            "Protection ACTIVE pour {site_host} - cliquer pour la désactiver (déblocage ponctuel)."
+                        )
+                    };
+                    if site_btn.on_hover_text(site_tip).clicked() && !site_host.is_empty() {
+                        blocklist::set_exempt(&site_host, !site_exempt);
+                        blocklist::save_exceptions();
+                        self.reload();
                     }
 
                     ui.add_space(4.0);

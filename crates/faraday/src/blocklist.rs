@@ -11,6 +11,8 @@
 //! Le `RequestHandler` demande à ce moteur s'il doit bloquer une URL ; un
 //! compteur global permet d'afficher le nombre de blocages sur le bouclier.
 
+use std::collections::HashSet;
+use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -51,6 +53,110 @@ pub fn dnt_enabled() -> bool {
 /// Active/désactive l'envoi de l'en-tête Do Not Track (en direct).
 pub fn set_dnt(value: bool) {
     DNT.store(value, Ordering::Relaxed);
+}
+
+// ---------------------------------------------------------------------------
+// Exceptions par site ("déblocage ponctuel")
+//
+// Certains sites (banques, messageries, portails) nécessitent le chargement de
+// ressources tierces pour fonctionner. L'utilisateur peut désactiver la
+// protection pour **un domaine donné** ; les sites ainsi exemptés ne subissent
+// ni le blocage réseau ni le blocage des cookies tiers.
+// ---------------------------------------------------------------------------
+
+/// Domaines exemptés (protection désactivée), en minuscules et sans `www.`.
+static EXCEPTIONS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn exceptions() -> &'static Mutex<HashSet<String>> {
+    EXCEPTIONS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Normalise un hôte pour comparaison : minuscules, sans schéma/chemin/port,
+/// sans point final ni préfixe `www.` (si un domaine reste).
+pub fn normalize_host(input: &str) -> String {
+    let host = host_of(input).to_lowercase();
+    let host = host.trim_end_matches('.').to_string();
+    match host.strip_prefix("www.") {
+        Some(rest) if rest.contains('.') => rest.to_string(),
+        _ => host,
+    }
+}
+
+/// Vrai si `host` est exempté (lui-même, `www.`, ou un domaine parent).
+pub fn is_exempt(host: &str) -> bool {
+    let host = normalize_host(host);
+    if host.is_empty() {
+        return false;
+    }
+    let set = exceptions().lock().unwrap();
+    if set.is_empty() {
+        return false;
+    }
+    if set.contains(&host) {
+        return true;
+    }
+    // Ex. « secure.banque.fr » est exempté si « banque.fr » l'est.
+    set.iter().any(|ex| host.ends_with(&format!(".{ex}")))
+}
+
+/// Ajoute/retire une exception pour un domaine.
+pub fn set_exempt(host: &str, exempt: bool) {
+    let host = normalize_host(host);
+    if host.is_empty() {
+        return;
+    }
+    let mut set = exceptions().lock().unwrap();
+    if exempt {
+        set.insert(host);
+    } else {
+        set.remove(&host);
+    }
+}
+
+/// Liste triée des domaines exemptés (affichée dans les Paramètres).
+pub fn exempt_list() -> Vec<String> {
+    let set = exceptions().lock().unwrap();
+    let mut list: Vec<String> = set.iter().cloned().collect();
+    list.sort();
+    list
+}
+
+fn exceptions_path() -> std::path::PathBuf {
+    crate::privacy::appdata_dir().join("exceptions.json")
+}
+
+/// Charge les exceptions depuis `%APPDATA%\Faraday\exceptions.json`.
+pub fn load_exceptions() {
+    let path = exceptions_path();
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(list) = serde_json::from_str::<Vec<String>>(&text) else {
+        eprintln!("[faraday] exceptions.json invalide, ignore");
+        return;
+    };
+    let mut set = exceptions().lock().unwrap();
+    set.clear();
+    for item in list {
+        let host = normalize_host(&item);
+        if !host.is_empty() {
+            set.insert(host);
+        }
+    }
+}
+
+/// Sauvegarde les exceptions sur disque.
+pub fn save_exceptions() {
+    let dir = crate::privacy::appdata_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    match serde_json::to_string_pretty(&exempt_list()) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(exceptions_path(), json) {
+                eprintln!("[faraday] exceptions: écriture impossible ({e})");
+            }
+        }
+        Err(e) => eprintln!("[faraday] exceptions: sérialisation impossible ({e})"),
+    }
 }
 
 /// Liste embarquée au moment de la compilation.
@@ -224,5 +330,30 @@ mod tests {
         assert!(bl.blocks("ads.example.com"));
         assert!(!bl.blocks("allow.example.com"));
         assert!(!bl.blocks("sub.allow.example.com"));
+    }
+
+    #[test]
+    fn host_normalization_for_exceptions() {
+        assert_eq!(normalize_host("https://www.Example.com/path"), "example.com");
+        assert_eq!(normalize_host("sub.example.com"), "sub.example.com");
+        assert_eq!(normalize_host("http://example.com:8080/x?y=1"), "example.com");
+        assert_eq!(normalize_host("banque.fr."), "banque.fr");
+        // « www.com » ne doit pas devenir « com »
+        assert_eq!(normalize_host("www.com"), "www.com");
+    }
+
+    #[test]
+    fn per_site_exceptions() {
+        // Déblocage ponctuel : un domaine exempté couvre ses sous-domaines.
+        assert!(!is_exempt("banque.fr"));
+        set_exempt("https://www.banque.fr/connexion", true);
+        assert!(is_exempt("banque.fr"));
+        assert!(is_exempt("www.banque.fr"));
+        assert!(is_exempt("secure.banque.fr"));
+        assert!(!is_exempt("autre.fr"));
+        assert!(exempt_list().contains(&"banque.fr".to_string()));
+        set_exempt("banque.fr", false);
+        assert!(!is_exempt("banque.fr"));
+        assert!(exempt_list().is_empty());
     }
 }

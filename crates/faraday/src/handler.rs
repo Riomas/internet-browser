@@ -141,6 +141,12 @@ fn host_is_third_party(host: &str, first_party: &str) -> bool {
     registrable_domain(host) != registrable_domain(first_party)
 }
 
+/// Hôte du site principal (« first party ») associé à une requête.
+fn first_party_host(request: &Request) -> String {
+    let raw = request.first_party_for_cookies();
+    blocklist::host_of(&userfree_to_string(&raw))
+}
+
 /// Vrai si la requête est « tierce partie » : son hôte diffère de celui du
 /// contexte de cookies (first party = site principal affiché).
 fn is_third_party_request(request: &Request) -> bool {
@@ -148,11 +154,14 @@ fn is_third_party_request(request: &Request) -> bool {
         let raw = request.url();
         userfree_to_string(&raw)
     };
-    let first_party = {
-        let raw = request.first_party_for_cookies();
-        userfree_to_string(&raw)
-    };
-    host_is_third_party(&blocklist::host_of(&url), &blocklist::host_of(&first_party))
+    host_is_third_party(&blocklist::host_of(&url), &first_party_host(request))
+}
+
+/// Vrai si la protection est **désactivée pour le site courant**
+/// (« déblocage ponctuel ») : on n'applique alors ni le blocage réseau, ni le
+/// blocage des cookies tiers.
+fn is_exempt_request(request: &Request) -> bool {
+    blocklist::is_exempt(&first_party_host(request))
 }
 
 // Filtre de cookies : refuse l'envoi/l'enregistrement des cookies tiers
@@ -169,7 +178,7 @@ wrap_cookie_access_filter! {
             _cookie: Option<&Cookie>,
         ) -> ::std::os::raw::c_int {
             match request {
-                Some(r) if is_third_party_request(r) => 0,
+                Some(r) if !is_exempt_request(r) && is_third_party_request(r) => 0,
                 _ => 1,
             }
         }
@@ -183,7 +192,7 @@ wrap_cookie_access_filter! {
             _cookie: Option<&Cookie>,
         ) -> ::std::os::raw::c_int {
             match request {
-                Some(r) if is_third_party_request(r) => 0,
+                Some(r) if !is_exempt_request(r) && is_third_party_request(r) => 0,
                 _ => 1,
             }
         }
@@ -514,13 +523,14 @@ wrap_resource_request_handler! {
                 return ReturnValue::CONTINUE;
             };
 
-            // Blocage des domaines de tracking/publicité (moteur Phase 2).
+            // Blocage des domaines de tracking/publicité (moteur Phase 2),
+            // sauf si le site courant est exempté (« déblocage ponctuel »).
             {
                 let url = {
                     let raw = req.url();
                     CefStringUtf16::from(&raw).to_string()
                 };
-                if blocklist::should_block(&url) {
+                if !is_exempt_request(req) && blocklist::should_block(&url) {
                     blocklist::incr_blocked();
                     return ReturnValue::CANCEL;
                 }
