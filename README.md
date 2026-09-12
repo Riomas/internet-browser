@@ -109,8 +109,9 @@ Les versions publiées sont sur la page **[Releases](https://github.com/Riomas/i
   avant intégration.
 - **Vie privée : ce programme ne transfère aucune information vers un système réseau tiers
   sans demande explicite de l'utilisateur ou de la personne qui l'installe.** Aucune
-  télémétrie, aucun compte, aucun envoi de statistiques (voir
-  `docs/GUIDE_UTILISATEUR.md`, « Vos données »).
+  télémétrie, aucun compte, aucun envoi de statistiques. Politique complète :
+  [`docs/CONFIDENTIALITE.md`](docs/CONFIDENTIALITE.md) ; voir aussi
+  `docs/GUIDE_UTILISATEUR.md`, « Vos données ».
 - Composants amont inclus : `libcef.dll`, `chrome_elf.dll`, `libEGL.dll`, `libGLESv2.dll`,
   `vk_swiftshader.dll`, `d3dcompiler_47.dll`… proviennent de **CEF / Chromium** (licence
   BSD) et sont redistribués tels quels. `faraday.exe` est le *bootstrap* de CEF renommé ;

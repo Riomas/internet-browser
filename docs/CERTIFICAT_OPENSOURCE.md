@@ -224,17 +224,21 @@ goes through a reviewed pull request.
 
 ## 8. Publier la release v0.1.0 (obligatoire avant de candidater)
 
-1. Lancer un build complet :
-   ```powershell
-   .\packaging\build-release.ps1 -Sandbox -Inno
-   ```
-2. GitHub → **Releases** → *Draft a new release* → tag `v0.1.0` (créer le tag sur `main`).
-3. Titre : `Faraday v0.1.0` ; coller les notes ci-dessous ; joindre
-   `Faraday-0.1.0-x64-portable.zip`, `Faraday-Setup-0.1.0-x64.exe` et `SHA256SUMS.txt`.
-4. Publier, puis **vérifier** que la page de la release décrit bien ce que fait le
-   logiciel et comment l'installer (exigence « Documented »).
+**Automatique (recommandé)** — le workflow `.github/workflows/build.yml` construit, teste,
+empaquette **puis publie la release** avec les binaires dès qu'un tag `v*` est poussé
+(jeton intégré de GitHub Actions : aucun secret à configurer) :
 
-Notes de version suggérées :
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+**Manuel (repli)** : `\packaging\build-release.ps1 -Sandbox -Inno`, puis GitHub →
+*Releases* → *Draft a new release* → tag `v0.1.0`, en joignant
+`Faraday-0.1.0-x64-portable.zip`, `Faraday-Setup-0.1.0-x64.exe` et `SHA256SUMS.txt`.
+
+Les notes de version publiées vivent dans **`packaging/release-notes.md`** (version longue
+reproduite ci-dessous, conservée pour référence) :
 
 ```markdown
 Première version publique de Faraday, navigateur « privacy-first » pour Windows.
@@ -255,3 +259,87 @@ Première version publique de Faraday, navigateur « privacy-first » pour Windo
 - `Faraday-Setup-0.1.0-x64.exe` : installation par utilisateur, sans droits administrateur
 - Vérifier l'intégrité avec `SHA256SUMS.txt`
 ```
+
+---
+
+## 9. Formulaire SignPath : réponses prêtes à coller
+
+Formulaire : <https://signpath.org/apply> (HubSpot, une page, ~5 minutes). Tout est prêt
+ci-dessous : **il ne reste que vos prénom, nom et adresse e-mail** (données personnelles,
+que vous seul pouvez saisir) et les cases d'acceptation.
+
+| Champ | Réponse |
+|---|---|
+| **Project Name\*** | `Faraday` |
+| **Repository URL\*** | `https://github.com/Riomas/internet-browser` |
+| **Homepage URL\*** | `https://github.com/Riomas/internet-browser` |
+| **Download URL** | `https://github.com/Riomas/internet-browser/releases` |
+| **Privacy Policy URL** | `https://github.com/Riomas/internet-browser/blob/main/docs/CONFIDENTIALITE.md` |
+| **Wikipedia URL** | *(vide)* |
+| **Tagline\*** | `Privacy-first web browser for Windows, written in Rust on Chromium (CEF)` |
+| **Description\*** | voir texte ci-dessous |
+| **Reputation\*** | voir texte ci-dessous |
+| **Maintainer Type** | `Individual` |
+| **Build System** | `GitHub Actions` |
+| **First Name / Last Name / Email\*** | ← **vos informations** |
+| **Company Name** | *(vide)* |
+| **Primary Discovery Channel\*** | `Search engine` |
+| **Please specify the exact source** | `Search while looking for free code signing for open source projects` |
+| Cases à cocher | à lire et accepter par vous — la 2ᵉ (communications marketing) est **facultative**, laissez-la décochée |
+
+### Description (à coller)
+
+```
+Faraday is a privacy-first web browser for Windows 10/11, built in Rust on top of the
+Chromium Embedded Framework (CEF). Out of the box it blocks tracking and advertising
+domains from an embedded rule list, filters third-party cookies, sends Do Not Track,
+strips Referer headers, forces HTTPS where available and hides the local IP from WebRTC.
+It runs the real Chromium sandbox for process isolation. Per-site unblocking and a
+temporary global pause are one click away, and a per-site counter shows what was blocked.
+Everything is local: no telemetry, no account, no data ever leaves the machine. It ships
+as a portable ZIP and a per-user installer with a full uninstaller, built from source by
+GitHub Actions with 28 unit tests.
+Repository: https://github.com/Riomas/internet-browser
+```
+
+### Reputation (à coller — factuel et honnête)
+
+```
+First public release: v0.1.0 (September 2026). The project is developed in the open under
+MIT OR Apache-2.0, with the complete source, documentation and build scripts in the
+repository. Every release is produced by a public GitHub Actions workflow (build + unit
+tests + packaging) from the tagged commit. The protection was validated in a clean
+Windows Sandbox environment with EFF Cover Your Tracks (blocking tracking ads: Yes,
+blocking invisible trackers: Yes). We understand this is a new project and that the
+required reputation may not be established yet; we will keep publishing releases from
+the public repository and are happy to provide anything else you need.
+```
+
+> ❓ **Question à poser** (dans Description ou par e-mail à support@signpath.io) : le
+> *bootstrap* de CEF exige que `faraday.exe`, `chrome_elf.dll` et `faraday.dll` soient
+> signés par **le même certificat**. `chrome_elf.dll` étant un fichier **amont** de CEF,
+> acceptez-vous de le signer avec notre paquet, ou faut-il se limiter à l'installateur ?
+> (phrase anglaise prête au §7).
+
+### Après acceptation
+
+- SignPath.io fournira un **jeton d'API** et un **identifiant d'organisation** : à
+  enregistrer comme *secrets* GitHub du dépôt (`SIGNPATH_API_TOKEN`,
+  `SIGNPATH_ORGANIZATION_ID`) — **jamais** dans un fichier ni dans une conversation.
+- Il faudra créer sur leur portail : un **projet** (`faraday`), un **certificat**, un
+  **signing policy** (`release-signing`) et une **artifact configuration** (fichiers à
+  signer + contraintes de métadonnées).
+- L'étape de signature, déjà écrite en commentaire dans `.github/workflows/build.yml`,
+  pourra alors être activée.
+
+---
+
+## 10. Récapitulatif des fichiers fournis pour la candidature
+
+| Fichier | Rôle |
+|---|---|
+| `LICENSE-MIT`, `LICENSE-APACHE` | licence OSI (exigée) |
+| `README.md` | description, téléchargement, **politique de signature**, lien confidentialité |
+| `docs/CONFIDENTIALITE.md` | politique de confidentialité (exigée) |
+| `.github/workflows/build.yml` | build vérifiable en CI + release automatique sur tag |
+| `packaging/release-notes.md` | notes de version publiées |
