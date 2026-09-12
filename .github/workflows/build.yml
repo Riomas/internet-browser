@@ -75,3 +75,36 @@ jobs:
       #     github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
       #     wait-for-completion: true
       #     output-artifact-directory: signed
+
+  # ---------------------------------------------------------------------------
+  # Publication automatique de la release : cree la release GitHub et y joint les
+  # binaires des qu'un tag `v*` est pousse. Utilise le jeton integre d'Actions
+  # (aucun secret a configurer).
+  # ---------------------------------------------------------------------------
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Recuperer les artefacts du build
+        uses: actions/download-artifact@v4
+        with:
+          name: faraday-windows-x64
+          path: artefacts
+
+      - name: Creer la release et y joindre les binaires
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          ls -l artefacts
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "Faraday ${GITHUB_REF_NAME}" \
+            --notes-file packaging/release-notes.md \
+            artefacts/*.zip artefacts/*.exe artefacts/*.txt \
+          || gh release upload "${GITHUB_REF_NAME}" artefacts/* --clobber
