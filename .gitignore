@@ -3,3 +3,8 @@
 *.pdb
 # CEF binaires téléchargés
 /.local
+# Distribution et outils locaux (jamais versionnés)
+/dist
+/dist-out
+/certs
+/tools

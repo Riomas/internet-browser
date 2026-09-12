@@ -17,11 +17,14 @@ path = "src/main.rs"
 name = "faraday_helper"
 path = "src/bin/faraday_helper.rs"
 
-[features]
-# En Phase 0, on désactive le sandbox par défaut (il nécessite bootstrap.exe).
-# On le réactivera pour la production (Phase 4/5).
-default = []
-sandbox = ["cef/sandbox"]
+# Bibliothèque partagée. Compilée aussi en DLL (`faraday_core.dll`, renommée
+# `faraday.dll` au packaging) pour le mode sandbox Chromium : la DLL exporte
+# `RunWinMain` et est lancée par `bootstrap.exe` (fourni par CEF) qui lui passe
+# le `sandbox_info`. Nom distinct du binaire pour éviter toute collision.
+[lib]
+name = "faraday_core"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
 
 # Métadonnées utilisées par l'outil `bundle-cef-app` (qui regroupe les binaires CEF).
 [package.metadata.cef.bundle]

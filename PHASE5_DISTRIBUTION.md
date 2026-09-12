@@ -10,9 +10,12 @@
 
 | Fichier | Rôle |
 |---|---|
-| `build-release.ps1` | Build `--release`, regroupe l'app dans `dist\Faraday\`, crée le **zip portable**, signature optionnelle, lance Inno si dispo (`-Inno`). |
+| `build-release.ps1` | Build `--release`, regroupe l'app dans `dist\Faraday\`, **signe** `faraday.exe`/`faraday_helper.exe`, crée le **zip portable**, compile et **signe l'installateur** (`-Inno`), écrit `dist\SHA256SUMS.txt`. |
 | `faraday.iss` | Script **Inno Setup 6** → installateur `dist\Faraday-Setup-0.1.0-x64.exe` (installation **par utilisateur**, sans admin/UAC). |
 | `make-icon.ps1` | Génère `crates\faraday\resources\icons\faraday.ico` (bouclier privacy, 16/32/48/256 px, format DIB compatible partout). |
+| `make-testcert.ps1` | Crée un **certificat de test auto-signé** (+ `-Trust`, `-Remove`) pour valider le pipeline de signature sans acheter de certificat. |
+| `build-signed.ps1` | Raccourci : reconstruit une distribution **signée** en une commande (utilise le certificat de test par défaut). |
+| `docs/SIGNATURE.md` | **Guide de signature de code** (types de certificats, coûts, token/HSM, Azure Trusted Signing). |
 | `PHASE5_DISTRIBUTION.md` | Ce guide. |
 
 Artéfacts générés (racine `dist/`) :
@@ -33,6 +36,11 @@ Le dossier `dist\Faraday\` contient **tout le nécessaire**, sans dépendance au
 - `libcef.dll` (Chromium 152), `chrome_elf.dll`, `libEGL/libGLESv2.dll`, `vk_swiftshader*`
 - `icudtl.dat`, `resources.pak`, `chrome_100/200_percent.pak`, `v8_context_snapshot.bin`
 - `d3dcompiler_47.dll`, `dxcompiler.dll`, `dxil.dll`, `vulkan-1.dll`
+- **`vcruntime140.dll` + `vcruntime140_1.dll`** — runtime Visual C++ embarqué « app-local »
+  (nos `faraday.exe`/`faraday_helper.exe` l'importent ; `libcef.dll` non). Indispensable sur
+  une machine **sans VC++ Redistributable** (VM/Sandbox propre) : sinon erreur
+  « `VCRUNTIME140.dll` est introuvable ». Copié depuis le dossier redistribuable officiel
+  Visual Studio (`…\VC\Redist\MSVC\…\x64\Microsoft.VC143.CRT`), repli `System32`.
 - `locales\` (220 fichiers de langue Chromium)
 - `CREDITS.html` (licences), `bootstrap*.exe` (sandbox, inoffensifs sinon)
 - **Aucune config ni donnée à côté de l'exe** : la blocklist et la config privacy sont
@@ -74,34 +82,87 @@ powershell -ExecutionPolicy Bypass -File .\packaging\build-release.ps1 -CertPath
 
 ## 4. Sandbox Chromium (sécurité)
 
-> ⚠️ **État actuel : NON PRÊT.** La feature `sandbox` du code est un **placeholder
-> de la Phase 0** : `main.rs` contient une seconde `fn main` (gated
-> `#[cfg(all(feature = "sandbox", windows))]`) qui **refuse de démarrer**
-> (`bail!("Le mode sandbox Windows nécessite bootstrap.exe…")`). Un build
-> `--features sandbox` produit donc un exécutable **non fonctionnel**.
-> → **Ne pas distribuer** de build `-Sandbox` en l'état.
+> ✅ **IMPLÉMENTÉ** (2026-09-12) — modèle officiel CEF M138+.
 
-La distribution CEF embarque `bootstrap.exe` / `bootstrapc.exe` (copiés dans le
-packaging), qui sont le support du sandbox Chromium sous Windows. Activer
-réellement le sandbox nécessite :
-1. Implémenter le lancement via `bootstrap` (d'après la mécanique CEF Windows), et
-2. **valider sur une Windows 10 propre (VM)**.
+Depuis **Chromium M138**, la bibliothèque statique `cef_sandbox` n'est plus
+distribuée : le sandbox Windows exige désormais que **l'application soit une DLL**
+exportant `RunWinMain`, lancée par `bootstrap.exe` (fourni par CEF) qui lui fournit
+le `sandbox_info` (pointeur opaque). Référence :
+<https://chromiumembedded.github.io/cef/sandbox_setup>
 
-**Recommandation** : rester sur le build non-sandbox (validé) pour la version
-0.1.0, et traiter le sandbox comme une **tâche Phase 5+ dédiée** (sécurité,
-nécessite VM + test d'intégration cef-rs).
+**Architecture mise en place** :
+
+| Élément | Rôle |
+|---|---|
+| `faraday.exe` | copie de `bootstrap.exe` (CEF) — met en place le sandbox et charge la DLL |
+| `faraday.dll` | l'application (`faraday_core.dll` renommée) — exporte **`RunWinMain`** |
+| `src/lib.rs` | cœur partagé : `browser_main(sandbox_info)` + export `RunWinMain` |
+| `src/main.rs` | binaire seul (mode **sans** sandbox) : appelle `browser_main(null)` |
+
+Le code détecte le mode automatiquement :
+`sandbox_info` **non nul** (lancé par le bootstrap) → `no_sandbox = false` et le
+pointeur est transmis à `execute_process` / `initialize` ; **nul** (exe direct) →
+sandbox désactivé. Aucune feature de compilation n'est nécessaire.
+
+**Construire la variante sandbox** :
+```powershell
+.\packaging\build-release.ps1 -Sandbox [ -Inno ] [ -CertPath … -CertPass … ]
+```
+
+**Vérifier que le sandbox est actif** : l'interface l'affiche (pied de page de la
+page d'accueil et infobulle du bouclier → « Sandbox Chromium : ACTIF »), et
+`%APPDATA%\Faraday\startup.log` contient `sandbox=active`.
+
+> ⚠️ La variante sandbox doit être **validée sur une machine propre** (le sandbox
+> CEF échoue au démarrage s'il est mal configuré — c'est un bon indicateur).
+> Le fichier `faraday.exe` (bootstrap CEF) porte l'icône/version de CEF : elle peut
+> être personnalisée avec Resource Hacker si souhaité.
 
 ---
 
 ## 5. Signature de code & SmartScreen
 
+> 📘 Guide détaillé : **`docs/SIGNATURE.md`** (choix du certificat, coûts, token/HSM,
+> Azure Trusted Signing, vérification).
+>
+> ✅ **Pipeline implémenté et testé** (2026-09-12) : `build-release.ps1 -Inno -CertPath … -CertPass …`
+> signe `faraday.exe`, `faraday_helper.exe` **avant** le zip/l'installateur, puis signe
+> l'installateur, et vérifie chaque signature (`signtool verify /pa`). `signtool.exe`
+> est repéré automatiquement (PATH → Windows Kits). Ordre correct garanti : les binaires
+> signés se retrouvent **dans** le zip et l'installateur. `SHA256SUMS.txt` couvre les
+> archives (un `.zip` ne peut pas être signé).
+
 Sans signature, Windows affiche « Éditeur inconnu / Windows a protégé votre PC » au
 téléchargement/lancement. Pour une diffusion publique il faudra :
 
 1. Acheter un **certificat de signature de code** (OV/EV) auprès d'un émetteur (DigiCert,
-   Sectigo…), ~150–400 €/an. L'EV lève aussi la réputation SmartScreen plus vite.
+   Sectigo…), ~200–600 €/an. L'EV lève aussi la réputation SmartScreen plus vite.
 2. Signer `faraday.exe`, `faraday_helper.exe` et l'installateur (SHA-256 + horodatage).
    Le script `build-release.ps1 -CertPath …` fait le nécessaire via `signtool.exe`.
+
+> ⚠️ Un certificat **auto-signé** (créé par `make-testcert.ps1`) permet de **valider
+> l'outillage** mais **ne débloque pas** Smart App Control / SmartScreen : seul un
+> certificat délivré par une AC de confiance le fait.
+
+### ⚠️ Smart App Control (Windows 11) — bloque les binaires non signés
+
+Symptôme observé en test : au lancement, « **Image incorrecte** » sur `libcef.dll`
+(code `0xc0e90002`), ou « **Une stratégie de contrôle d'application a bloqué ce fichier** ».
+
+**Cause** : Smart App Control (SAC) est **activé**. La clé
+`HKLM\SYSTEM\CurrentControlSet\Control\CI\Policy\VerifiedAndReputablePolicyState`
+vaut **1** (= application). SAC exige des binaires **signés réputés** ; or Faraday 0.1.0
+n'est pas signé → Windows bloque l'exe et/ou le chargement de `libcef.dll`.
+(Note : SAC démarre en mode *évaluation* — d'où des lancements réussis au début — puis
+passe en mode *application* automatiquement.)
+
+**Options** :
+- **Signer** les binaires (solution pérenne, cf. ci-dessus) ;
+- **Désactiver SAC** : Sécurité Windows → Contrôle des applications et du navigateur →
+  Smart App Control → Désactivé ⚠️ **irréversible sans réinstallation de Windows** ;
+- **Tester sur une VM / un PC sans SAC** (recommandé pour valider la distribution).
+
+> Cette contrainte ne concerne pas le développement habituel sur une machine sans SAC.
 
 ---
 
@@ -122,13 +183,20 @@ mise à jour doit passer par **notre** mécanisme.
 
 ## 7. Vérifications avant publication (checklist)
 
-- [ ] Test sur **Windows 10 propre (VM)** : installation par utilisateur sans UAC.
+> Procédure détaillée : **`docs/TEST_VM.md`** (options Hyper-V / VirtualBox / Windows Sandbox
+> + checklist complète à remplir).
+
+- [x] **Test machine propre** — ✅ validé le 2026-09-12 en **Windows Sandbox** (portable) :
+      l'application démarre et s'affiche (après correction du runtime CRT, cf. §2).
+- [x] **EFF Cover Your Tracks : Yes / Yes** — ✅ validé le 2026-09-12 sur la **build
+      distribuée** (zip portable) dans l'environnement propre.
 - [ ] Au 1er lancement : `%APPDATA%\Faraday\` créé, `privacy.toml` généré (valeurs par défaut privées).
-- [ ] EFF Cover Your Tracks : **Yes / Yes** par défaut.
 - [ ] Aucune requête sortante vers Google/services tiers au démarrage (netstat / proxy).
 - [ ] Désinstallation : supprime l'app, **option** de suppression des données.
-- [ ] (Recommandé) Build `--features sandbox` validé sur la VM.
-- [ ] (Avant diffusion publique) Signature de code + page de téléchargement HTTPS.
+- [x] **Sandbox Chromium validé** — ✅ 2026-09-12 : la variante sandbox (`-Sandbox`) s'ouvre
+      dans Windows Sandbox et l'interface affiche **« Sandbox Chromium : ACTIF »**.
+- [ ] (Avant diffusion publique) Signature de code + page de téléchargement HTTPS
+      → sinon Smart App Control / WDAC bloquent les binaires non signés (cf. §5).
 
 ---
 

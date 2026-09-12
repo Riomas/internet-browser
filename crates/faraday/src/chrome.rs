@@ -985,15 +985,20 @@ impl FaradayChrome {
         // Pied de page : signal privacy (en bas à gauche).
         let p = ui.painter();
         let protection = blocklist::enabled();
+        let sandbox_note = if crate::SANDBOX_ACTIVE.load(std::sync::atomic::Ordering::Relaxed) {
+            "sandbox actif"
+        } else {
+            "sandbox désactivé"
+        };
         let note = if protection {
             format!(
-                "{} Mode privé par défaut  •  {engine_host}  •  {blocked} requête{} de tracking bloquée{}",
+                "{} Mode privé par défaut  •  {engine_host}  •  {blocked} requête{} de tracking bloquée{}  •  {sandbox_note}",
                 icons::SHIELD_CHECK,
                 if blocked > 1 { "s" } else { "" },
                 if blocked > 1 { "s" } else { "" }
             )
         } else {
-            format!("{} Protection anti-tracking désactivée (Paramètres)", icons::SHIELD_CHECK)
+            format!("{} Protection anti-tracking désactivée (Paramètres)  •  {sandbox_note}", icons::SHIELD_CHECK)
         };
         p.text(
             egui::pos2(rect.left() + 22.0, rect.bottom() - 18.0),
@@ -2040,9 +2045,15 @@ impl eframe::App for FaradayChrome {
                             if blocked > 1 { "s" } else { "" }
                         )
                     };
+                    let sandbox_state =
+                        if crate::SANDBOX_ACTIVE.load(std::sync::atomic::Ordering::Relaxed) {
+                            "Sandbox Chromium : ACTIF (isolation des processus)"
+                        } else {
+                            "Sandbox Chromium : désactivé"
+                        };
                     if shield
                         .on_hover_text(format!(
-                            "{tip}\nCliquer : tester sur EFF Cover Your Tracks."
+                            "{tip}\n{sandbox_state}\nCliquer : tester sur EFF Cover Your Tracks."
                         ))
                         .clicked()
                     {
