@@ -42,7 +42,17 @@ jobs:
 
       - name: Build release + distribution (zip portable + installateur)
         shell: pwsh
-        run: .\packaging\build-release.ps1 -Sandbox -Inno
+        run: |
+          Write-Host "pwsh $($PSVersionTable.PSVersion) | CEF_PATH=$env:CEF_PATH"
+          try {
+            .\packaging\build-release.ps1 -Sandbox -Inno
+          } catch {
+            # Rend l'erreur lisible dans les annotations du workflow (l'API
+            # publique des journaux exige une authentification).
+            "::error::" + $_.Exception.Message
+            if ($_.ScriptStackTrace) { "::error::" + ($_.ScriptStackTrace -split "`n")[0] }
+            exit 1
+          }
 
       - name: Empreintes SHA-256
         shell: pwsh

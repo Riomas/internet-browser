@@ -38,11 +38,20 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# PowerShell 7.4+ : par defaut, un binaire qui ecrit sur stderr (cargo, signtool,
+# ISCC...) declenche une erreur fatale des lors que $ErrorActionPreference vaut
+# "Stop" - ce qui interrompait le script en CI. On garde "Stop" pour les cmdlets
+# PowerShell, mais on verifie nous-memes les codes de retour des binaires.
+$PSNativeCommandUseErrorActionPreference = $false
+
 # --- Environnement CEF / cargo ---------------------------------------------
 $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
 if (-not $env:CEF_PATH) { $env:CEF_PATH = "$env:USERPROFILE\.local\share\cef" }
 if (-not (Test-Path $env:CEF_PATH)) {
-    Write-Error "CEF_PATH introuvable ($env:CEF_PATH). Lance d'abord un cargo build en dev."
+    # Non bloquant : le regroupement se fait a partir de target\release, ou les
+    # fichiers runtime CEF sont deja presents (copies par le build) ; l'absence
+    # de la distribution CEF est verifiee explicitement plus bas.
+    Write-Warning "CEF_PATH introuvable ($env:CEF_PATH) - regroupement depuis target\release."
 }
 
 $root    = Split-Path -Parent $PSScriptRoot          # racine du depot
