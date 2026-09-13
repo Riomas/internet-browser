@@ -279,47 +279,82 @@ que vous seul pouvez saisir) et les cases d'acceptation.
 | **Tagline\*** | `Privacy-first web browser for Windows, written in Rust on Chromium (CEF)` |
 | **Description\*** | voir texte ci-dessous |
 | **Reputation\*** | voir texte ci-dessous |
-| **Maintainer Type** | `Individual` |
+| **Maintainer Type** | `Individual maintainer(s)` *(options : Independent community project / Non-profit / For-profit / **Individual maintainer(s)** / Other)* |
 | **Build System** | `GitHub Actions` |
 | **First Name / Last Name / Email\*** | ← **vos informations** |
 | **Company Name** | *(vide)* |
-| **Primary Discovery Channel\*** | `Search engine` |
+| **Primary Discovery Channel\*** | `Organic search` *(options : Organic search / AI-LLM tools / Developer platforms / Community platforms / Social media / Events / Referral / Direct contact / Other)* |
 | **Please specify the exact source** | `Search while looking for free code signing for open source projects` |
 | Cases à cocher | à lire et accepter par vous — la 2ᵉ (communications marketing) est **facultative**, laissez-la décochée |
 
 ### Description (à coller)
 
 ```
-Faraday is a privacy-first web browser for Windows 10/11, built in Rust on top of the
-Chromium Embedded Framework (CEF). Out of the box it blocks tracking and advertising
-domains from an embedded rule list, filters third-party cookies, sends Do Not Track,
-strips Referer headers, forces HTTPS where available and hides the local IP from WebRTC.
-It runs the real Chromium sandbox for process isolation. Per-site unblocking and a
-temporary global pause are one click away, and a per-site counter shows what was blocked.
-Everything is local: no telemetry, no account, no data ever leaves the machine. It ships
-as a portable ZIP and a per-user installer with a full uninstaller, built from source by
-GitHub Actions with 28 unit tests.
+Faraday is a privacy-first web browser for Windows 10/11, written in Rust on top of the
+Chromium Embedded Framework (CEF). It is a complete desktop browser (tabs, bookmarks,
+history, downloads, separated profiles, light/dark theme) whose default behaviour is to
+protect the user:
+
+- blocks tracking and advertising domains using an embedded rule list;
+- filters third-party cookies and sends the Do Not Track header;
+- strips the Referer header, forces HTTPS where the site supports it, and hides the local
+  IP address from WebRTC;
+- runs the real Chromium sandbox for process isolation;
+- provides per-site unblocking (one click on the shield button) and a temporary global
+  pause of all protections, both reversible, plus a per-site counter showing what was
+  blocked and by which site.
+
+Everything stays on the user's machine: no telemetry, no account, no crash reporting,
+nothing is ever sent anywhere. The program writes only inside its own folder and
+%APPDATA%\Faraday, and it ships with a full uninstaller (data deletion is offered during
+uninstallation). The project is licensed under MIT OR Apache-2.0, with the complete
+source, documentation and build scripts in the public repository. Releases are produced
+by a public GitHub Actions workflow (build + 28 unit tests + packaging) from the tagged
+commit, and distributed as a portable ZIP and a per-user installer that needs no
+administrator rights.
+
 Repository: https://github.com/Riomas/internet-browser
+
+One question, if I may: the CEF bootstrap we use refuses to start unless faraday.exe,
+chrome_elf.dll and faraday.dll are all signed by the same certificate. chrome_elf.dll is
+an upstream CEF/Chromium runtime file (BSD licence) that we redistribute unchanged.
+Would it be possible to sign it together with our own binaries under this subscription?
+If that goes against your policy, we will sign the installer only - we completely
+understand, and we would rather ask than assume.
 ```
 
 ### Reputation (à coller — factuel et honnête)
 
 ```
-First public release: v0.1.0 (September 2026). The project is developed in the open under
-MIT OR Apache-2.0, with the complete source, documentation and build scripts in the
-repository. Every release is produced by a public GitHub Actions workflow (build + unit
-tests + packaging) from the tagged commit. The protection was validated in a clean
-Windows Sandbox environment with EFF Cover Your Tracks (blocking tracking ads: Yes,
-blocking invisible trackers: Yes). We understand this is a new project and that the
-required reputation may not be established yet; we will keep publishing releases from
-the public repository and are happy to provide anything else you need.
+Faraday is a new project: version 0.1.0, first public release in September 2026.
+
+Facts that anyone can verify today:
+
+- the repository is public and contains the whole source code, the Windows metadata and
+  packaging scripts, the test suite and the documentation;
+- every release is built by the public GitHub Actions workflow from the tagged commit
+  (build, 28 unit tests, packaging), so a signed binary can always be traced back to an
+  exact commit;
+- the protection was validated on a clean Windows Sandbox (a freshly installed Windows
+  virtual machine) with EFF Cover Your Tracks: "Blocking tracking ads: Yes" and
+  "Blocking invisible trackers: Yes";
+- "no telemetry, no account, no data collection" is a design rule of the project, and the
+  privacy policy is published in the repository.
+
+We understand that software which users download and execute needs a verifiable
+reputation, and that a project with a single release does not have much of it yet. We are
+committed to publishing every release from the public repository, to reviewing all external
+contributions through pull requests, and to keeping the code signing policy up to date.
+We will gladly provide anything else you may need: build logs, checksums, extra
+documentation, or a walkthrough of the build.
 ```
 
-> ❓ **Question à poser** (dans Description ou par e-mail à support@signpath.io) : le
-> *bootstrap* de CEF exige que `faraday.exe`, `chrome_elf.dll` et `faraday.dll` soient
-> signés par **le même certificat**. `chrome_elf.dll` étant un fichier **amont** de CEF,
-> acceptez-vous de le signer avec notre paquet, ou faut-il se limiter à l'installateur ?
-> (phrase anglaise prête au §7).
+> ❓ **La question sur `chrome_elf.dll` est déjà incluse à la fin du texte de
+> *Description*** ci-dessus. Si vous préférez l'envoyer séparément, écrivez à
+> `support@signpath.io` : le *bootstrap* de CEF exige que `faraday.exe`, `chrome_elf.dll`
+> et `faraday.dll` soient signés par **le même certificat** ; `chrome_elf.dll` étant un
+> fichier **amont** de CEF, il faut leur accord pour le signer avec notre paquet (sinon on
+> se limite à l'installateur).
 
 ### Après acceptation
 
