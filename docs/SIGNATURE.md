@@ -128,6 +128,12 @@ Le fichier `signing-metadata.json` décrit le compte Trusted Signing et le profi
 
 ## 7. Tester le pipeline dès maintenant (certificat auto-signé)
 
+> 💡 **Vous cherchez un certificat gratuit ?** Lisez d'abord
+> [`CERTIFICAT_OPENSOURCE.md`](CERTIFICAT_OPENSOURCE.md) : le programme « Open Source » de
+> Certum n'est plus gratuit, et **SignPath Foundation** signe gratuitement les projets
+> open source (conditions à remplir, dont un dépôt public). Ce qui suit ne concerne que le
+> **test du pipeline** avec un certificat auto-signé.
+
 Pour valider toute la chaîne **sans acheter de certificat** :
 
 ```powershell
