@@ -6,12 +6,12 @@
 ; distribution non signée. Le dossier de données reste dans %APPDATA%\Faraday.
 
 #ifndef FaradayVersion
-  #define FaradayVersion "0.1.0"
+  #define FaradayVersion "0.1.1"
 #endif
 
 #define AppName      "Faraday"
 #define AppPublisher "Faraday"
-#define AppURL       "https://example.invalid/faraday"   ; TODO : page de téléchargement
+#define AppURL       "https://github.com/Riomas/internet-browser"
 #define AppExe       "faraday.exe"
 
 [Setup]

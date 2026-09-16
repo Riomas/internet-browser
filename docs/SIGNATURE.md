@@ -30,7 +30,7 @@
 | `faraday.dll` | Code de l'application (variante sandbox) |
 | `faraday_helper.exe` | Processus enfant CEF |
 | `chrome_elf.dll` | Préchargé par le bootstrap : **contrôlé** pour la signature |
-| `Faraday-Setup-0.1.0-x64.exe` | Installateur (évite l'alerte « Éditeur inconnu ») |
+| `Faraday-Setup-0.1.1-x64.exe` | Installateur (évite l'alerte « Éditeur inconnu ») |
 
 > ⚠️ **Contrainte CEF (à connaitre absolument)** : au démarrage, `bootstrap.exe` vérifie la
 > signature de `faraday.exe`, puis de `chrome_elf.dll`, puis de `faraday.dll`. La règle est
@@ -83,8 +83,8 @@ Le script :
 
 ```powershell
 # L'installateur est toujours signé
-signtool verify /pa /v "dist\Faraday-Setup-0.1.0-x64.exe"
-Get-AuthenticodeSignature "dist\Faraday-Setup-0.1.0-x64.exe" | Format-List Status, SignerCertificate
+signtool verify /pa /v "dist\Faraday-Setup-0.1.1-x64.exe"
+Get-AuthenticodeSignature "dist\Faraday-Setup-0.1.1-x64.exe" | Format-List Status, SignerCertificate
 
 # Le lot applicatif : "NotSigned" par défaut (voir §2), ou "Valid" avec -SignAppFiles
 Get-AuthenticodeSignature "dist\Faraday\faraday.exe" | Format-List Status
@@ -144,7 +144,8 @@ Pour valider toute la chaîne **sans acheter de certificat** :
 
 ```powershell
 # 1) Créer un certificat de test (magasin utilisateur, aucun droit admin)
-.\packaging\make-testcert.ps1 -Trust      # -Trust ajoute le cert aux magasins de confiance utilisateur
+#    -Trust ajoute le certificat aux magasins de confiance de l'utilisateur.
+.\packaging\make-testcert.ps1 -Trust
 
 # 2) Build + installateur signe (le lot applicatif reste non signe : voir §2)
 .\packaging\build-release.ps1 -Inno -CertPath .\certs\faraday-test.pfx -CertPass "faraday-test"
@@ -152,6 +153,11 @@ Pour valider toute la chaîne **sans acheter de certificat** :
 # 3) Nettoyer (supprimer le certificat de test de la machine)
 .\packaging\make-testcert.ps1 -Remove
 ```
+
+> 🔐 Pour le certificat de **distribution** (celui qui signe les versions publiées), ne pas
+> utiliser `make-testcert.ps1` mais `.\packaging\make-signing-cert.ps1 -Trust`
+> (`CN=Faraday, O=Faraday Project`, `certs\faraday.pfx`) : voir
+> [`CERTIFICAT_AUTOSIGNE.md`](CERTIFICAT_AUTOSIGNE.md) §3.
 
 > ⚠️ Rappel : signé avec un certificat auto-signé, Faraday **restera bloqué par Smart App
 > Control** sur cette machine. Le but est de prouver que la signature fonctionne

@@ -63,6 +63,9 @@ publicité rejetés avant chargement).
 
 ## État du projet
 
+- **v0.1.1** — distribution **signée** : lot applicatif et installateur signés par un
+  certificat auto-signé (`CN=Faraday`), que l'installateur propose d'approuver dans les
+  certificats de confiance du compte utilisateur ([doc](docs/CERTIFICAT_AUTOSIGNE.md)).
 - **v0.1.0** — phases 0 à 5 terminées : noyau CEF, blocage des trackers/publicités,
   interface complète (onglets, favoris, historique, téléchargements, profils,
   déblocage par site, suspension temporaire), **sandbox Chromium**, distribution
@@ -89,9 +92,16 @@ Les versions publiées sont sur la page **[Releases](https://github.com/Riomas/i
 
 | Fichier | Description |
 |---|---|
-| `Faraday-0.1.0-x64-portable.zip` | version **portable** : décompresser puis lancer `faraday.exe` |
-| `Faraday-Setup-0.1.0-x64.exe` | **installateur** (par utilisateur, sans droits administrateur) |
+| `Faraday-0.1.1-x64-portable.zip` | version **portable** : approuver le certificat, puis lancer `faraday.exe` |
+| `Faraday-Setup-0.1.1-x64.exe` | **installateur** (par utilisateur, sans droits administrateur) |
 | `SHA256SUMS.txt` | empreintes SHA-256 pour vérifier l'intégrité |
+
+> 🔐 Les binaires sont signés par un **certificat auto-signé** fourni dans le lot :
+> l'installateur propose de l'approuver pour votre compte (aucun droit administrateur),
+> et la version portable nécessite une approbation unique :
+> `powershell -ExecutionPolicy Bypass -File .\faraday-certificat.ps1 -Install`.
+> Sans cette étape, l'application **ne démarre pas** (le *bootstrap* de CEF vérifie la
+> signature). Détails : [`docs/CERTIFICAT_AUTOSIGNE.md`](docs/CERTIFICAT_AUTOSIGNE.md).
 
 > Windows 10/11 **64 bits**. Le sandbox Chromium est actif, et aucun composant tiers
 > n'est téléchargé au démarrage. Le désinstallateur est fourni par l'installateur.

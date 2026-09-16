@@ -311,10 +311,21 @@ if ($Inno) {
 }
 
 # --- 6) Sommes de controle (integrite des archives non signables) -------------
+# On ne liste QUE les artefacts produits par cette execution : les fichiers d'une
+# version precedente (ou les fichiers d'outillage presents dans dist\) ne doivent
+# pas s'y melanger, sinon une release publiee annonce des empreintes trompeuses.
 $sums = Join-Path $distOut "SHA256SUMS.txt"
 $lines = @()
-foreach ($f in (Get-ChildItem $distOut -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" })) {
-    $lines += ("{0}  {1}" -f (Get-FileHash $f.FullName -Algorithm SHA256).Hash, $f.Name)
+$noms = @(
+    "Faraday-$version-x64-portable.zip",
+    "Faraday-Setup-$version-x64.exe",
+    "Faraday-$version-certificat.cer"
+)
+foreach ($nom in $noms) {
+    $f = Join-Path $distOut $nom
+    if (Test-Path $f) {
+        $lines += ("{0}  {1}" -f (Get-FileHash $f -Algorithm SHA256).Hash, $nom)
+    }
 }
 if ($lines.Count -gt 0) {
     $lines | Set-Content -Path $sums -Encoding ASCII

@@ -113,8 +113,13 @@ jobs:
         run: |
           set -e
           ls -l artefacts
+          # Si la release existe deja, on n'y touche pas : elle a pu etre publiee
+          # avec des binaires signes LOCALEMENT (cle privee non disponible en CI).
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} deja publiee : binaires signes localement, rien a faire."
+            exit 0
+          fi
           gh release create "${GITHUB_REF_NAME}" \
             --title "Faraday ${GITHUB_REF_NAME}" \
             --notes-file packaging/release-notes.md \
-            artefacts/*.zip artefacts/*.exe artefacts/*.txt \
-          || gh release upload "${GITHUB_REF_NAME}" artefacts/* --clobber
+            artefacts/*.zip artefacts/*.exe artefacts/*.txt

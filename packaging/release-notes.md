@@ -1,3 +1,40 @@
+# Faraday v0.1.1
+
+Version de **distribution** : mêmes fonctions que la v0.1.0, mais les binaires sont
+**signés** et l'installateur prend en charge l'approbation du certificat.
+
+## Signature (nouveau)
+
+- Lot applicatif **signé** (`faraday.exe`, `faraday_helper.exe`, `chrome_elf.dll`,
+  `faraday.dll`) et **installateur signé**, avec un certificat **auto-signé**
+  `CN=Faraday, O=Faraday Project` (valide jusqu'au 16/09/2036, horodaté).
+- L'installateur propose d'approuver le certificat dans les *Autorités de certification
+  racines de confiance* du **compte utilisateur** (aucun droit administrateur) ; il est
+  retiré automatiquement à la désinstallation.
+- Cette approbation est **nécessaire au démarrage** : le *bootstrap* de CEF vérifie la
+  signature de `faraday.exe`, `chrome_elf.dll` et `faraday.dll`.
+- **Version portable** : approuver le certificat une fois avant de lancer :
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\faraday-certificat.ps1 -Install
+  ```
+- Détails, retrait et points de sécurité : `docs/CERTIFICAT_AUTOSIGNE.md`.
+
+> ⚠️ Un certificat auto-signé n'a **pas** la réputation Microsoft : **Smart App Control**
+> reste bloquant et **SmartScreen** peut afficher un avertissement. Un certificat
+> d'autorité (en préparation) lèvera ces deux points.
+
+## Installation
+
+| Fichier | Utilisation |
+|---|---|
+| `Faraday-0.1.1-x64-portable.zip` | version portable : approuver le certificat, puis lancer `faraday.exe` |
+| `Faraday-Setup-0.1.1-x64.exe` | installateur par utilisateur (**sans droits administrateur**) |
+| `SHA256SUMS.txt` | empreintes SHA-256 pour vérifier l'intégrité |
+
+**Prérequis** : Windows 10 (1809+) ou Windows 11, 64 bits.
+
+---
+
 # Faraday v0.1.0
 
 Première version publique de **Faraday**, navigateur « privacy-first » pour Windows,

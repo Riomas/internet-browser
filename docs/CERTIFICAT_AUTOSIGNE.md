@@ -41,7 +41,7 @@ l'approuve. `libcef.dll` reste non signé (binaire amont CEF) : voir la limite �
 
 ## 2. Comment ça marche (parcours utilisateur)
 
-1. L'utilisateur lance `Faraday-Setup-0.1.0-x64.exe`.
+1. L'utilisateur lance `Faraday-Setup-0.1.1-x64.exe`.
 2. À l'écran **« Certificat de signature Faraday »**, une case est cochée par défaut :
 
    > *« Approuver le certificat de signature Faraday pour mon compte utilisateur »*
@@ -100,14 +100,32 @@ powershell -ExecutionPolicy Bypass -File .\faraday-certificat.ps1 -Remove
 
 ## 3. Construire un lot conforme
 
+Le certificat de distribution est créé (une seule fois) par
+`packaging/make-signing-cert.ps1` :
+
+| Champ | Valeur |
+|---|---|
+| Sujet | `CN=Faraday, O=Faraday Project` |
+| Nature | auto-signé, RSA 4096 / SHA-256, EKU *Code Signing* |
+| Validité | 10 ans (16/09/2026 → 16/09/2036) |
+| Empreinte (SHA-1) | `EFB4E86D4523514A5672CF4879ED88D96E395EBE` |
+| Fichiers | `certs\faraday.pfx` (clé privée, **SECRÈTE**), `certs\faraday.cer` (clé publique) |
+
 ```powershell
-# 1) Certificat auto-signe (magasin utilisateur, aucun droit admin)
-.\packaging\make-testcert.ps1
+# 1) Créer le certificat + l'approuver sur cette machine (magasin utilisateur, aucun droit admin)
+.\packaging\make-signing-cert.ps1 -Trust
 
 # 2) Build + installateur, avec LE LOT APPLICATIF SIGNÉ et le certificat public joint
 .\packaging\build-release.ps1 -Sandbox -Inno -SignAppFiles `
-    -CertPath .\certs\faraday-test.pfx -CertPass "faraday-test"
+    -CertPath .\certs\faraday.pfx -CertPass "<mot de passe>"
 ```
+
+> 🔑 Le mot de passe du `.pfx` est écrit une fois dans `certs\faraday-password.txt`
+> (ignoré par git) : à recopier dans un gestionnaire de mots de passe, puis à supprimer.
+> Le `.pfx` **ne doit jamais être publié** (`make-signing-cert.ps1 -Remove` nettoie tout).
+> Pour un build scripté, lire le mot de passe depuis ce fichier plutôt que de l'écrire en
+> clair dans une commande :
+> `$p = (Get-Content .\certs\faraday-password.txt -Raw).Trim()`
 
 Le script :
 
@@ -136,6 +154,10 @@ approuvé au départ**, avec les fichiers de `dist\Faraday` (lot signé) :
 |---|---|---|
 | **A** — lancement **sans** approbation | `faraday.exe` signé, racine inconnue | ❌ ne démarre pas : sortie immédiate (code `-2147483645`), `debug.log` avec `WinVerifyTrust failed (-2146762487)`, 0 processus |
 | **B** — approbation puis lancement | `faraday-certificat.ps1 -Install` puis `faraday.exe` | ✅ démarre : `faraday 0.1.0 - demarrage (sandbox=active)`, **4 processus CEF vivants**, aucun `debug.log` |
+
+Ce parcours a été rejoué avec le **certificat de distribution**
+(`CN=Faraday, O=Faraday Project`, empreinte `EFB4E86D4523514A5672CF4879ED88D96E395EBE`) :
+mêmes résultats (phase A refusée, phase B démarrée, 4 processus).
 
 Le test est reproductible : `tools\diag\launch-cert.wsb` (double-clic).
 
