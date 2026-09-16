@@ -3,6 +3,10 @@
 > Navigateur web « privacy-first » basé sur **Chromium embarqué (CEF)**, codé en **Rust**.
 > **Tous les trackings sont désactivés par défaut.** Cible : **Windows 10+**.
 
+**Site du projet : <https://riomas.github.io/internet-browser/>** ·
+**[Télécharger la dernière version](https://github.com/Riomas/internet-browser/releases/latest)** ·
+[Toutes les versions](https://github.com/Riomas/internet-browser/releases)
+
 ## Structure du projet
 
 ```
