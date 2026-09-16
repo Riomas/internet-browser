@@ -1,0 +1,26 @@
+<Configuration>
+  <!--
+    Faraday - banc de diagnostic automatise (blocage reseau + exemption par site).
+    Monte l'application et le dossier de diagnostic, puis execute le script.
+    Le sandbox s'eteint tout seul a la fin ; les journaux apparaissent dans
+    tools\diag\out sur la machine hote.
+  -->
+  <VGpu>Disable</VGpu>
+  <Networking>Enable</Networking>
+  <ClipboardRedirection>true</ClipboardRedirection>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\Users\mario\Dev\internet-browser\dist\Faraday</HostFolder>
+      <SandboxFolder>C:\FaradayApp</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>C:\Users\mario\Dev\internet-browser\tools\diag</HostFolder>
+      <SandboxFolder>C:\Diag</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\Diag\diag-tracking.ps1</Command>
+  </LogonCommand>
+</Configuration>

@@ -11,8 +11,19 @@
 
 ### Version portable (aucune installation)
 1. Décompressez `Faraday-0.1.0-x64-portable.zip`.
-2. Double-cliquez sur `faraday.exe`.
-3. (Optionnel) Créez un raccourci vers `faraday.exe` sur le bureau ou la barre des tâches.
+2. **Approuvez le certificat de signature** (une seule fois, sans droits administrateur) —
+   dans le dossier décompressé :
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\faraday-certificat.ps1 -Install
+   ```
+   *(Le certificat est un certificat **auto-signé** ; Windows l'affichera comme non vérifié.
+   Détails et points de sécurité : [`CERTIFICAT_AUTOSIGNE.md`](CERTIFICAT_AUTOSIGNE.md).)*
+3. Double-cliquez sur `faraday.exe`.
+4. (Optionnel) Créez un raccourci vers `faraday.exe` sur le bureau ou la barre des tâches.
+
+> Sans l'étape 2, le navigateur **ne démarre pas** : aucune fenêtre ne s'ouvre et un fichier
+> `debug.log` apparaît à côté de `faraday.exe` (règle de vérification de signature de CEF,
+> détaillée dans [`CERTIFICAT_AUTOSIGNE.md`](CERTIFICAT_AUTOSIGNE.md) §1).
 
 Vos données (onglets, historique, réglages) sont enregistrées dans
 `%APPDATA%\Faraday` — pas dans le dossier du programme. Vous pouvez donc
@@ -22,7 +33,18 @@ déplacer le dossier Faraday sans rien perdre.
 1. Lancez `Faraday-Setup-0.1.0-x64.exe`.
 2. Suivez l'assistant (installation **pour votre compte uniquement**, sans mot de
    passe administrateur).
-3. Faraday est disponible dans le menu Démarrer et (si coché) sur le bureau.
+3. À l'écran **« Certificat de signature Faraday »**, laissez la case cochée : le certificat
+   public est ajouté aux certificats de confiance de **votre compte** (c'est ce qui permet à
+   Faraday de démarrer). Aucun droit administrateur n'est demandé et le certificat est retiré
+   automatiquement à la désinstallation.
+4. Windows peut demander une confirmation (« Voulez-vous installer ce certificat ? ») :
+   répondez **Oui**.
+5. Faraday est disponible dans le menu Démarrer et (si coché) sur le bureau.
+
+> 🔐 **Pourquoi un certificat ?** Faraday est signé, mais avec un certificat **auto-signé**
+> (en attendant un certificat d'autorité payant) : Windows ne peut donc pas le vérifier
+> seul. En savoir plus, et comment le retirer à tout moment :
+> [`CERTIFICAT_AUTOSIGNE.md`](CERTIFICAT_AUTOSIGNE.md).
 
 > À la désinstallation, vos données de navigation sont **conservées** par défaut.
 > Cochez « Supprimer aussi les données de navigation » pour tout effacer.

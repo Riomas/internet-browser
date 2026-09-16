@@ -66,11 +66,92 @@ Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags
 Type: filesandordirs; Name: "{localappdata}\Faraday"; Tasks: deleteuserdata
 
 [Code]
+// ---------------------------------------------------------------------------
+// Approbation du certificat de signature (version auto-signee).
+//
+// Le certificat public (faraday-certificat.cer) et son utilitaire sont joints au
+// lot applicatif. L'utilisateur choisit explicitement de l'approuver dans SON
+// magasin de certificats (aucun droit administrateur) ; le retrait est
+// automatique a la desinstallation. Sans cette approbation, Windows affiche un
+// editeur inconnu et le bootstrap de Chromium refuse de demarrer (signature non
+// fiable).
+// ---------------------------------------------------------------------------
+var
+  PageCertificat: TInputOptionWizardPage;
+
+function ScriptCertificat(): String;
+begin
+  Result := ExpandConstant('{app}\faraday-certificat.ps1');
+end;
+
+function CertificatDisponible(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\faraday-certificat.cer')) and
+            FileExists(ScriptCertificat());
+end;
+
+procedure InitializeWizard();
+begin
+  PageCertificat := CreateInputOptionPage(wpSelectTasks,
+    'Certificat de signature Faraday',
+    'Windows ne connait pas encore l''editeur de cette application.',
+    'Cette version de Faraday est signee par un certificat propre au projet, pas encore ' +
+    'delivre par une autorite de certification. Pour que Windows affiche le bon editeur, ' +
+    'et pour que l''application signee puisse demarrer sur cet ordinateur, ce certificat ' +
+    'doit etre approuve.' + #13#10 + #13#10 +
+    'Il sera ajoute uniquement a VOS certificats de confiance (compte utilisateur courant, ' +
+    'aucun droit administrateur) et retire automatiquement lors de la desinstallation.' + #13#10 + #13#10 +
+    'Tu peux decocher cette case et installer le certificat plus tard en lancant ' +
+    'faraday-certificat.ps1 depuis le dossier d''installation.',
+    False, False);
+  PageCertificat.Add('Approuver le certificat Faraday sur ce compte utilisateur (recommande)');
+  PageCertificat.Values[0] := True;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  // Rien a approuver si le certificat n'est pas joint au lot.
+  Result := (PageID = PageCertificat.ID) and not CertificatDisponible();
+end;
+
+function ApprobationDemandee(): Boolean;
+begin
+  Result := (PageCertificat <> nil) and PageCertificat.Values[0] and CertificatDisponible();
+end;
+
+function ExecCertificat(Options: String): Integer;
+var
+  Code: Integer;
+begin
+  Code := -1;
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+       '-NoProfile -ExecutionPolicy Bypass -File "' + ScriptCertificat() + '" ' + Options,
+       '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Result := Code;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
-    // Premier lancement : Faraday crée lui-même son profil (%APPDATA%\Faraday)
-    // et sa config privacy à partir des valeurs embarquées. Rien à faire ici.
+    if ApprobationDemandee() then
+    begin
+      if ExecCertificat('-Install') <> 0 then
+      begin
+        MsgBox('Le certificat Faraday n''a pas pu etre approuve automatiquement.' + #13#10 + #13#10 +
+               'Tu peux le faire plus tard, sans droits administrateur :' + #13#10 +
+               '  powershell -ExecutionPolicy Bypass -File "' + ScriptCertificat() + '"',
+               mbInformation, MB_OK);
+      end;
+    end;
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    // Sans effet si le certificat n'est pas present : on ne touche qu'a celui-ci.
+    ExecCertificat('-Remove');
   end;
 end;

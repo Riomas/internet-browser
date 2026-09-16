@@ -1,0 +1,20 @@
+<Configuration>
+  <!-- Faraday - verification du certificat auto-signe (phase A sans, phase B avec). -->
+  <VGpu>Disable</VGpu>
+  <Networking>Disable</Networking>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\Users\mario\Dev\internet-browser\dist\Faraday</HostFolder>
+      <SandboxFolder>C:\FaradayApp</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>C:\Users\mario\Dev\internet-browser\tools\diag</HostFolder>
+      <SandboxFolder>C:\Diag</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\Diag\launch-cert.ps1</Command>
+  </LogonCommand>
+</Configuration>

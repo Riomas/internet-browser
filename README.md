@@ -103,7 +103,17 @@ Les versions publiées sont sur la page **[Releases](https://github.com/Riomas/i
 
 ## Politique de signature de code
 
-- **Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).**
+- **Signé par certificat auto-signé (procédure [`docs/CERTIFICAT_AUTOSIGNE.md`](docs/CERTIFICAT_AUTOSIGNE.md)).**
+  Le certificat public est joint aux artefacts (`faraday-certificat.cer`) et l'installateur
+  propose de l'approuver dans les certificats de confiance du **compte de l'utilisateur**
+  (aucun droit administrateur, retiré à la désinstallation). Cette étape est nécessaire au
+  démarrage de l'application, le *bootstrap* de CEF vérifiant la signature de
+  `faraday.exe`, `chrome_elf.dll` et `faraday.dll`.
+- **Objectif à terme** : un certificat d'autorité de certification (AC) pour supprimer tout
+  avertissement Windows. Parcours prêts : [`docs/CERTUM.md`](docs/CERTUM.md) et
+  [`docs/CERTIFICAT_OPENSOURCE.md`](docs/CERTIFICAT_OPENSOURCE.md) (⏸️ en pause).
+- **Signature gratuite (SignPath Foundation) : refusée** le 13/09/2026 — motif : réputation du
+  projet jugée insuffisante. Réessayable ultérieurement.
 - Mainteneur (auteur, relecteur et approbateur) : [@Riomas](https://github.com/Riomas)
 - Validation des changements : toute contribution externe passe par une *pull request* relue
   avant intégration.
@@ -119,6 +129,7 @@ Les versions publiées sont sur la page **[Releases](https://github.com/Riomas/i
 
 ## Documentation
 
-`docs/` contient le guide utilisateur, le guide de signature, la procédure de test en
-machine propre, le parcours de certification (**`CERTUM.md`**) et la marche à suivre pour un
-certificat open source.
+`docs/` contient le guide utilisateur, le guide de signature, la **distribution avec
+certificat auto-signé** (**`CERTIFICAT_AUTOSIGNE.md`**, mode actuel), la procédure de test en
+machine propre, le parcours de certification (**`CERTUM.md`**, en pause) et la marche à
+suivre pour un certificat open source.

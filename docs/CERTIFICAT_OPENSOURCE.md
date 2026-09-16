@@ -389,9 +389,14 @@ SignPath Foundation réserve son certificat aux projets dont la **réputation es
 
 ### Recommandation
 
-> ✅ **Choix retenu : Certum *Open Source Code Signing in the Cloud*. La procédure complète,
-> pas-à-pas (achat → activation → signature → publication) est dans
-> [`CERTUM.md`](CERTUM.md).**
+> ⏸️ **Parcours payant EN PAUSE (décision utilisateur).** Faraday est distribué pour
+> l'instant avec un **certificat auto-signé approuvé par l'installateur** dans le magasin de
+> l'utilisateur : voir **[`CERTIFICAT_AUTOSIGNE.md`](CERTIFICAT_AUTOSIGNE.md)** (gratuit,
+> vérifié en Sandbox).
+>
+> ✅ **Quand la certification sera reprise** : Certum *Open Source Code Signing in the Cloud*.
+> La procédure complète, pas-à-pas (achat → activation → signature → publication) est prête
+> dans [`CERTUM.md`](CERTUM.md).
 
 1. **Certum Open Source Code Signing in the Cloud — 58 $ / 49 €** :
    <https://certum.store/open-source-code-signing-on-simplysign.html> (ou la boutique € :

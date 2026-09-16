@@ -7,4 +7,6 @@
 /dist
 /dist-out
 /certs
-/tools
+/tools/*
+!/tools/diag/
+/tools/diag/out/

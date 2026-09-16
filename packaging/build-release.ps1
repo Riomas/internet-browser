@@ -248,16 +248,38 @@ if ($signtool) {
         Write-Host "    non approuve sur la cible) ne demarre pas."
         Write-Host "    Pour signer malgre tout : -SignAppFiles (avec certificat de confiance)."
     }
-    # Certificat public a cote des artefacts (utile pour un certificat auto-signe).
-    # Rien a copier quand on signe depuis le magasin (empreinte) : le certificat
-    # est deja approuve sur la machine cible.
+    # --- Certificat public : joint au lot pour approbation par l'utilisateur ---
+    # L'installeur (et la version portable) proposent d'approuver le certificat
+    # dans le magasin de l'utilisateur courant : c'est ce qui rend les binaires
+    # signes reconnus par Windows - et ce qui permet au bootstrap de CEF de
+    # demarrer, puisqu'il exige une chaine de confiance valide.
+    $cer = $null
     if ($CertPath) {
-        $cer = [System.IO.Path]::ChangeExtension($CertPath, ".cer")
-        if ($cer -and (Test-Path $cer)) {
-            $cerOut = Join-Path $distOut "Faraday-$version-certificat.cer"
-            Copy-Item $cer $cerOut -Force
-            Write-Host "==> Certificat public copie : $cerOut"
+        $candidate = [System.IO.Path]::ChangeExtension($CertPath, ".cer")
+        if ($candidate -and (Test-Path $candidate)) { $cer = $candidate }
+    } elseif ($CertThumbprint) {
+        $fromStore = Get-ChildItem Cert:\CurrentUser\My, Cert:\LocalMachine\My -ErrorAction SilentlyContinue |
+            Where-Object { $_.Thumbprint -eq $CertThumbprint } | Select-Object -First 1
+        if ($fromStore) {
+            $candidate = Join-Path $env:TEMP "faraday-certificat.cer"
+            try {
+                Export-Certificate -Cert $fromStore -FilePath $candidate -Type CERT | Out-Null
+                $cer = $candidate
+            } catch {
+                Write-Warning "Export du certificat public impossible : $($_.Exception.Message)"
+            }
         }
+    }
+    if ($cer) {
+        Copy-Item $cer (Join-Path $stage "faraday-certificat.cer") -Force
+        Copy-Item $cer (Join-Path $distOut "Faraday-$version-certificat.cer") -Force
+        $helper = Join-Path $PSScriptRoot "installer\faraday-certificat.ps1"
+        if (Test-Path $helper) {
+            Copy-Item $helper (Join-Path $stage "faraday-certificat.ps1") -Force
+        }
+        Write-Host "==> Certificat public joint au lot (faraday-certificat.cer + utilitaire)"
+    } else {
+        Write-Warning "Certificat public (.cer) introuvable : il ne sera pas propose a l'installation."
     }
 }
 
