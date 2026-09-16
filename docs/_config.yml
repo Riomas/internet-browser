@@ -1,0 +1,20 @@
+theme: jekyll-theme-cayman
+title: Faraday
+description: Navigateur web privacy-first pour Windows — la protection est le réglage par défaut.
+show_downloads: false
+
+# Convertit les liens relatifs « .md » des pages en « .html » dans le site publié,
+# pour que les renvois entre documents fonctionnent aussi bien sur GitHub que sur
+# le site (plugin officiel pris en charge par GitHub Pages).
+plugins:
+  - jekyll-relative-links
+
+relative_links:
+  enabled: true
+
+github:
+  is_project_page: true
+  owner_name: Riomas
+  repository_name: internet-browser
+  zip_url: https://github.com/Riomas/internet-browser/releases/latest/download/Faraday-Setup-0.1.1-x64.exe
+  tar_url: https://github.com/Riomas/internet-browser/releases/latest/download/Faraday-0.1.1-x64-portable.zip
