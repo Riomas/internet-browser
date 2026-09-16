@@ -149,3 +149,25 @@ foreach ($data in $images) { $bw.Write($data) }
 $bw.Flush(); $bw.Dispose(); $fs.Dispose()
 
 Write-Host ("Icône générée : {0} ({1} octets)" -f $outFile, (Get-Item $outFile).Length)
+
+# --- Version RGBA brute (icône de la fenêtre egui) ----------------------------
+# egui attend des pixels RGBA8 NON prémultipliés, ligne 0 = haut de l'image.
+# Ce fichier est embarqué par crates/faraday/src/chrome.rs (include_bytes!).
+$rgbaSize = 64
+$rgbaFile = Join-Path $outDir "faraday-64.rgba"
+$bmp = New-ShieldBitmap -Size $rgbaSize
+$octets = New-Object byte[] ($rgbaSize * $rgbaSize * 4)
+$i = 0
+for ($y = 0; $y -lt $rgbaSize; $y++) {
+    for ($x = 0; $x -lt $rgbaSize; $x++) {
+        $px = $bmp.GetPixel($x, $y)
+        $octets[$i] = $px.R
+        $octets[$i + 1] = $px.G
+        $octets[$i + 2] = $px.B
+        $octets[$i + 3] = $px.A
+        $i += 4
+    }
+}
+$bmp.Dispose()
+[System.IO.File]::WriteAllBytes($rgbaFile, $octets)
+Write-Host ("Icône fenêtre (RGBA {0}x{0}) : {1} ({2} octets)" -f $rgbaSize, $rgbaFile, $octets.Length)

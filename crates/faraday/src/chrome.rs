@@ -2541,10 +2541,22 @@ impl eframe::App for FaradayChrome {
 
 /// Lance la fenêtre egui (chrome + page OSR).
 pub fn run(view_size: ViewSize) -> anyhow::Result<()> {
+    // Icône de la fenêtre (barre des tâches, Alt+Tab) : même visuel que l'icône
+    // du programme, générée par `packaging/make-icon.ps1`. Sans elle, Windows
+    // reprend l'icône du fichier exécutable (celle de CEF en mode sandbox).
+    const ICON_RGBA: &[u8] = include_bytes!("../resources/icons/faraday-64.rgba");
+    const ICON_SIZE: u32 = 64;
+    let icon = egui::IconData {
+        rgba: ICON_RGBA.to_vec(),
+        width: ICON_SIZE,
+        height: ICON_SIZE,
+    };
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([600.0, 400.0])
+            .with_icon(icon)
             .with_title("Faraday Browser - Privacy First"),
         ..Default::default()
     };

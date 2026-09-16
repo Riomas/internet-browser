@@ -34,7 +34,8 @@ param(
     [string]$Csp = "",
     [string]$KeyContainer = "",
     [string]$TimestampUrl = "http://timestamp.digicert.com",
-    [switch]$SignAppFiles
+    [switch]$SignAppFiles,
+    [switch]$SkipAppResources
 )
 
 $ErrorActionPreference = "Stop"
@@ -173,6 +174,17 @@ Write-Host "    (taille : $sizeMb Mo)"
 Get-ChildItem $stage -Filter "*.log" -File -ErrorAction SilentlyContinue |
     Where-Object { $_.DirectoryName -eq $stage } |
     ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
+
+# --- 2b) Identite Windows du lot (icone + metadonnees) ------------------------
+# En mode sandbox, faraday.exe est le bootstrap de CEF (icone CEF, nom "CEF
+# Bootstrap Application") et faraday_helper.exe son sous-processus (vide) : on
+# leur copie l'icone et les metadonnees de faraday.dll. A faire AVANT la
+# signature, car modifier un binaire invalide sa signature Authenticode.
+if ($SkipAppResources) {
+    Write-Host "==> Identite Windows : ignoree (-SkipAppResources)"
+} else {
+    & "$PSScriptRoot\set-app-resources.ps1" -Stage $stage
+}
 
 # --- 3) Signature (AVANT zip et installateur) --------------------------------
 # Installateur : toujours signe s'il y a un certificat (aucune contrainte CEF).

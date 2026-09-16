@@ -51,6 +51,34 @@
 > Le `.zip` portable **ne peut pas être signé** (ce n'est pas un fichier PE) → on fournit
 > un **`SHA256SUMS.txt`** pour vérifier l'intégrité.
 
+## 2 bis. Identité Windows des binaires (icône + métadonnées)
+
+En mode sandbox, `faraday.exe` est le `bootstrap.exe` de CEF **renommé** et
+`faraday_helper.exe` son sous-processus : ils portent donc l'icône et la fiche de CEF
+(« CEF Bootstrap Application », voire rien du tout). Explorer, le menu Démarrer, la barre des
+tâches et les raccourcis afficheraient cette identité au lieu de celle de Faraday.
+
+`packaging/set-app-resources.ps1` y remédie : après le regroupement et **avant la
+signature**, il copie les ressources Windows de `faraday.dll` (qui contient l'icône et les
+métadonnées de Faraday, posées par `crates/faraday/build.rs`) vers ces deux exécutables :
+
+| Ressource | Contenu |
+|---|---|
+| `RT_GROUP_ICON` + `RT_ICON` | icône du programme (générée par `packaging/make-icon.ps1`) |
+| `RT_VERSION` | `ProductName`, `FileDescription`, version |
+
+> ⚠️ Cet ordre est impératif : modifier un binaire **invalide sa signature Authenticode**.
+> Le script est appelé automatiquement par `build-release.ps1` (option `-SkipAppResources`
+> pour l'ignorer) et refuse d'échouer silencieusement.
+
+Le contrôle se fait avec `tools\diag\check-icons.ps1` : il extrait l'icône réellement
+embarquée dans chaque binaire, la compare à `faraday.ico` par empreinte SHA-256 et affiche
+une planche de comparaison (`tools\diag\out\icons\planche-icones.png`).
+
+> L'icône de la **fenêtre** (barre des tâches, Alt+Tab) est en plus définie dans le code
+> (`crates/faraday/src/chrome.rs`, `ViewportBuilder::with_icon`) à partir de
+> `resources/icons/faraday-64.rgba`, également produit par `make-icon.ps1`.
+
 **Ordre correct** (déjà implémenté dans `packaging/build-release.ps1`) :
 `cargo build` → `dist\Faraday\` → *(signature du lot si `-SignAppFiles`)* → zip portable →
 installateur compilé puis **signé** → `SHA256SUMS.txt`.

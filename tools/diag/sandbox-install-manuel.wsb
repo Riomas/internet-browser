@@ -1,0 +1,28 @@
+<Configuration>
+  <!--
+    Faraday - test MANUEL de l'installateur dans un Windows Sandbox VIERGE.
+
+    Double-clique ce fichier : un Sandbox propre s'ouvre et lance l'assistant
+    d'installation. C'est le seul parcours non automatisable (l'affichage de la
+    page « Certificat de signature Faraday » et son clic).
+
+    A verifier :
+      1. la page « Certificat de signature Faraday » s'affiche, case cochee ;
+      2. l'installation se termine sans demande de mot de passe administrateur ;
+      3. l'application demarre (fenetre Faraday) ;
+      4. desinstallation : Parametres > Applications > Faraday > Desinstaller,
+         puis verifier que le certificat a disparu de
+         certmgr.msc > Autorites de certification racines de confiance > Certificats.
+  -->
+  <VGpu>Disable</VGpu>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\Users\mario\Dev\internet-browser\dist</HostFolder>
+      <SandboxFolder>C:\Dist</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>C:\Dist\Faraday-Setup-0.1.1-x64.exe</Command>
+  </LogonCommand>
+</Configuration>
