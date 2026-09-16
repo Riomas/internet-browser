@@ -114,9 +114,27 @@ begin
   Result := (PageID = PageCertificat.ID) and not CertificatDisponible();
 end;
 
+function ApprobationRefusee(): Boolean;
+begin
+  // /NOCERT=1 : ne pas approuver le certificat (installation silencieuse).
+  Result := CompareText(ExpandConstant('{param:NOCERT|}'), '1') = 0;
+end;
+
 function ApprobationDemandee(): Boolean;
 begin
-  Result := (PageCertificat <> nil) and PageCertificat.Values[0] and CertificatDisponible();
+  if not CertificatDisponible() then
+  begin
+    Result := False;
+    Exit;
+  end;
+  if WizardSilent() then
+  begin
+    // Installation silencieuse : la page de choix n'existe pas. On applique le
+    // defaut (case cochee), sinon l'application installee ne demarrerait pas.
+    Result := not ApprobationRefusee();
+    Exit;
+  end;
+  Result := (PageCertificat <> nil) and PageCertificat.Values[0];
 end;
 
 function ExecCertificat(Options: String): Integer;
@@ -138,10 +156,11 @@ begin
     begin
       if ExecCertificat('-Install') <> 0 then
       begin
-        MsgBox('Le certificat Faraday n''a pas pu etre approuve automatiquement.' + #13#10 + #13#10 +
-               'Tu peux le faire plus tard, sans droits administrateur :' + #13#10 +
-               '  powershell -ExecutionPolicy Bypass -File "' + ScriptCertificat() + '"',
-               mbInformation, MB_OK);
+        if not WizardSilent() then
+          MsgBox('Le certificat Faraday n''a pas pu etre approuve automatiquement.' + #13#10 + #13#10 +
+                 'Tu peux le faire plus tard, sans droits administrateur :' + #13#10 +
+                 '  powershell -ExecutionPolicy Bypass -File "' + ScriptCertificat() + '"',
+                 mbInformation, MB_OK);
       end;
     end;
   end;

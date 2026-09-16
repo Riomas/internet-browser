@@ -60,6 +60,24 @@ l'approuve. `libcef.dll` reste non signé (binaire amont CEF) : voir la limite �
 
 > Décocher la case laisse la machine intacte : rien n'est ajouté aux magasins de certificats.
 
+### Installation silencieuse (`/VERYSILENT`, `/SILENT`)
+
+La page de choix n'existe pas dans ce mode : l'installateur applique **le défaut**, c'est-à-dire
+l'approbation du certificat (comme la case cochée). Sans cela, une installation non surveillée
+laisserait une application incapable de démarrer.
+
+```powershell
+# Déploiement silencieux : certificat approuvé (défaut)
+Faraday-Setup-0.1.1-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+
+# Déploiement silencieux SANS approuver le certificat
+Faraday-Setup-0.1.1-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCERT=1
+```
+
+> Avec `/NOCERT=1`, l'application est installée mais **ne démarrera pas** avant approbation
+> manuelle : `powershell -ExecutionPolicy Bypass -File "%LOCALAPPDATA%\Faraday\faraday-certificat.ps1"`.
+> C'est le comportement recommandé lorsque l'administrateur veut contrôler la confiance.
+
 ### Ce que fait exactement l'utilitaire
 
 ```powershell
@@ -160,6 +178,17 @@ Ce parcours a été rejoué avec le **certificat de distribution**
 mêmes résultats (phase A refusée, phase B démarrée, 4 processus).
 
 Le test est reproductible : `tools\diag\launch-cert.wsb` (double-clic).
+
+### Parcours complet de l'installateur
+
+Le même parcours a été rejoué **via l'installateur**, sur un Windows Sandbox vierge
+(`tools\diag\install-e2e.wsb`) :
+
+| Phase | Scénario | Résultat mesuré |
+|---|---|---|
+| **A** | `Faraday-Setup-0.1.1-x64.exe /VERYSILENT` | ✅ installé dans `%LOCALAPPDATA%\Faraday`, certificat **approuvé par l'installateur**, application démarrée (**4 processus CEF**) |
+| **B** | désinstallation silencieuse (`unins000.exe /VERYSILENT`) | ✅ certificat **retiré** du magasin de l'utilisateur |
+| **C** | installation avec `/NOCERT=1` | ✅ installé, certificat non approuvé → l'application **refuse de démarrer** (comportement voulu) |
 
 > 💡 **Attente possible hors connexion** : l'ajout d'une racine déclenche la mise à jour
 > automatique des certificats racine par Windows. Sur une machine **sans réseau** (cas du
