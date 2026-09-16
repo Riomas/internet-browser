@@ -33,6 +33,7 @@ param(
     [string]$CertThumbprint = "",
     [string]$Csp = "",
     [string]$KeyContainer = "",
+    [string]$TimestampUrl = "http://timestamp.digicert.com",
     [switch]$SignAppFiles
 )
 
@@ -204,6 +205,7 @@ if ($signActive) {
         } else {
             Write-Host "==> certificat : $CertPath"
         }
+        Write-Host "    horodatage (TSA) : $TimestampUrl"
     }
 }
 
@@ -220,7 +222,7 @@ function Invoke-FaradaySign {
         if ($CertPass) { $certArg += @("/p", $CertPass) }
     }
     Write-Host "==> Signature : $(Split-Path $Path -Leaf)"
-    & $signtool sign /fd SHA256 @certArg /tr http://timestamp.digicert.com /td SHA256 /v $Path
+    & $signtool sign /fd SHA256 @certArg /tr $TimestampUrl /td SHA256 /v $Path
     if ($LASTEXITCODE -ne 0) { throw "Echec de signature : $Path (code $LASTEXITCODE)" }
     & $signtool verify /pa /v $Path | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Verification de signature echouee : $Path" }
@@ -247,11 +249,15 @@ if ($signtool) {
         Write-Host "    Pour signer malgre tout : -SignAppFiles (avec certificat de confiance)."
     }
     # Certificat public a cote des artefacts (utile pour un certificat auto-signe).
-    $cer = [System.IO.Path]::ChangeExtension($CertPath, ".cer")
-    if (Test-Path $cer) {
-        $cerOut = Join-Path $distOut "Faraday-$version-certificat.cer"
-        Copy-Item $cer $cerOut -Force
-        Write-Host "==> Certificat public copie : $cerOut"
+    # Rien a copier quand on signe depuis le magasin (empreinte) : le certificat
+    # est deja approuve sur la machine cible.
+    if ($CertPath) {
+        $cer = [System.IO.Path]::ChangeExtension($CertPath, ".cer")
+        if ($cer -and (Test-Path $cer)) {
+            $cerOut = Join-Path $distOut "Faraday-$version-certificat.cer"
+            Copy-Item $cer $cerOut -Force
+            Write-Host "==> Certificat public copie : $cerOut"
+        }
     }
 }
 
@@ -299,4 +305,12 @@ Write-Host "  - dossier app  : $stage"
 Write-Host "  - zip portable : $zip"
 if ($Inno) { Write-Host "  - installateur : $distOut\Faraday-Setup-$version-x64.exe" }
 Write-Host "  - sommes       : $sums"
-if ($signtool) { Write-Host "  - signature    : OUI (certificat $CertPath)" } else { Write-Host "  - signature    : non (aucun certificat fourni)" }
+if ($signtool) {
+    $who = if ($CertThumbprint) { "magasin, empreinte $CertThumbprint" } else { $CertPath }
+    Write-Host "  - signature    : OUI ($who)"
+    if ($SignAppFiles) {
+        Write-Host "                   (lot applicatif + installateur)"
+    } else {
+        Write-Host "                   (installateur seul - ajouter -SignAppFiles pour signer tout le lot)"
+    }
+} else { Write-Host "  - signature    : non (aucun certificat fourni)" }

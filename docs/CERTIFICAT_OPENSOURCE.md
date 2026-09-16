@@ -369,7 +369,57 @@ documentation, or a walkthrough of the build.
 
 ---
 
-## 10. Récapitulatif des fichiers fournis pour la candidature
+## 10. Plan B — après un refus de SignPath (relevé le 16/09/2026)
+
+SignPath Foundation réserve son certificat aux projets dont la **réputation est déjà
+établie** et refuse de signer des binaires **amont** (ce qui, chez nous, bloque
+`chrome_elf.dll`). Un refus n'est pas un échec : il existe des alternatives payantes mais
+**peu coûteuses**, qui nous donnent en plus le droit de signer **tout** le lot — y compris
+`chrome_elf.dll` — donc de produire une application entièrement signée.
+
+| Option | Prix (1re année) | Matériel | Signer tout le lot (dont `chrome_elf.dll`) | Remarques |
+|---|---|---|---|---|
+| **Certum — Open Source Code Signing *in the Cloud*** | **58 $ / 49 €** | **aucun** (SimplySign, carte virtuelle) | ✅ | **Le moins cher.** Réservé aux projets open source (dépôt public exigé). Vérification d'identité. |
+| Certum — Open Source *code* | 29 $ | il faut **déjà posséder** une carte cryptoCertum + lecteur | ✅ | Le prix le plus bas, mais le matériel coûte ~60 $. |
+| Certum — Open Source *set* | 89 $ | carte + lecteur **inclus** | ✅ | Intéresse si l'on veut du matériel physique. |
+| **Azure Artifact Signing** (ex-Trusted Signing) | **9,99 $/mois ≈ 120 $/an** | aucun (HSM Microsoft) | ✅ | **Validation d'identité « Individual » acceptée** (pièce d'identité + selfie). Abonnement Azure payant obligatoire. Certificats de 3 jours renouvelés automatiquement, horodatage Microsoft. Intégration GitHub Actions officielle. |
+| Certum — Standard OV *in the Cloud* | 249 $ | aucun | ✅ | Si le statut « open source » ne convient pas. |
+| Certum — EV *in the Cloud* | 459 $ | aucun | ✅ | Réputation SmartScreen quasi immédiate. |
+| SignPath Foundation | 0 $ | aucun | ❌ | Soumise à réputation ; refusée le 13/09/2026. Réessayable plus tard. |
+
+### Recommandation
+
+> ✅ **Choix retenu : Certum *Open Source Code Signing in the Cloud*. La procédure complète,
+> pas-à-pas (achat → activation → signature → publication) est dans
+> [`CERTUM.md`](CERTUM.md).**
+
+1. **Certum Open Source Code Signing in the Cloud — 58 $ / 49 €** :
+   <https://certum.store/open-source-code-signing-on-simplysign.html> (ou la boutique € :
+   <https://shop.certum.eu/open-source-code-signing-on-simplysign.html>).
+   Aucun matériel à recevoir, et **notre script gère déjà ce mode** :
+   ```powershell
+   .\packaging\build-release.ps1 -Sandbox -Inno -SignAppFiles `
+       -CertThumbprint <EMPREINTE> -Csp "Certum SimplySign"
+   ```
+2. **Azure Artifact Signing** (9,99 $/mois) si l'on préfère le cloud Microsoft, la rotation
+   automatique des certificats et l'action GitHub officielle — éligible en **particulier**.
+   À noter : le CN du certificat est le **nom légal validé** (pas de personnalisation), et
+   la signature passe par `signtool /dlib …/Azure.CodeSigning.Dlib.dll /dmdf metadata.json`
+   (il faudra ajouter ce mode au script).
+
+### À faire une fois le certificat obtenu
+
+- Signer **le lot applicatif** (`-SignAppFiles`) : le bootstrap CEF exige `faraday.exe`,
+  `chrome_elf.dll` et `faraday.dll` signés par **le même certificat** (aucun souci avec un
+  certificat d'AC, approuvé partout).
+- Envisager de signer aussi **le reste des DLL CEF** (`libcef.dll`, `libEGL.dll`,
+  `vk_swiftshader.dll`…) pour les machines où **Smart App Control** est actif.
+- Republier une version signée (nouveau tag, p. ex. `v0.1.1`) et mettre à jour
+  `docs/SIGNATURE.md` avec l'empreinte et le fournisseur retenus.
+
+---
+
+## 11. Récapitulatif des fichiers fournis pour la candidature
 
 | Fichier | Rôle |
 |---|---|

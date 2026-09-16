@@ -120,4 +120,5 @@ Les versions publiées sont sur la page **[Releases](https://github.com/Riomas/i
 ## Documentation
 
 `docs/` contient le guide utilisateur, le guide de signature, la procédure de test en
-machine propre et la marche à suivre pour un certificat open source.
+machine propre, le parcours de certification (**`CERTUM.md`**) et la marche à suivre pour un
+certificat open source.
