@@ -1,9 +1,16 @@
 #Requires -Version 5.1
 <#
   Faraday — génération de l'icône applicative (faraday.ico).
-  Bouclier vert « privacy » sur dalle sombre arrondie.
-  Format .ico classique : entrées BMP/DIB 32bpp (compatible Explorer Win10/11,
+  Bouclier vert "privacy" sur dalle sombre arrondie.
+  Format .ico classique : entrees BMP/DIB 32bpp (compatible Explorer Win10/11,
   ressources Win32, Inno Setup).
+
+  ATTENTION - OBSOLETE : l'icone officielle de Faraday est desormais le LOGO
+  (bouclier bleu + F). Pipeline a utiliser :
+    .\packaging\make-logo-detoure.ps1   (logo.png -> logo-transparent.png)
+    .\packaging\make-icons.ps1          (-> faraday.ico, favicon, PNG)
+  Ce script ecraserait faraday.ico par l'ancien bouclier vert : ne l'executer
+  que pour retrouver l'ancien visuel.
 
   Sortie : crates\faraday\resources\icons\faraday.ico
   Usage   : powershell -ExecutionPolicy Bypass -File .\packaging\make-icon.ps1

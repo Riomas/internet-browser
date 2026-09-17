@@ -2,14 +2,15 @@
 //!
 //! Intègre l'icône applicative et les métadonnées Windows (version, produit)
 //! dans les exécutables via `winres`. L'icône est générée par
-//! `packaging/make-icon.ps1` → `resources/icons/faraday.ico`.
+//! `packaging/make-logo-detoure.ps1` (détourage du logo) puis
+//! `packaging/make-icons.ps1` → `resources/icons/faraday.ico`.
 
 #[cfg(target_os = "windows")]
 fn main() {
     if std::env::var_os("CARGO_CFG_TARGET_OS").map(|s| s == "windows").unwrap_or(false) {
         let mut res = winres::WindowsResource::new();
 
-        // Icône du navigateur (générée par packaging/make-icon.ps1).
+        // Icône du navigateur (générée par packaging/make-icons.ps1).
         res.set_icon("resources/icons/faraday.ico");
 
         // Métadonnées de version / produit (affichées par Explorer, SmartScreen…).

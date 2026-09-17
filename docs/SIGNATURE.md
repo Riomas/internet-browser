@@ -77,7 +77,11 @@ une planche de comparaison (`tools\diag\out\icons\planche-icones.png`).
 
 > L'icône de la **fenêtre** (barre des tâches, Alt+Tab) est en plus définie dans le code
 > (`crates/faraday/src/chrome.rs`, `ViewportBuilder::with_icon`) à partir de
-> `resources/icons/faraday-64.rgba`, également produit par `make-icon.ps1`.
+> `resources/icons/faraday-64.rgba`, également produit par `make-icons.ps1`.
+>
+> L'ensemble des fichiers d'icône provient de `logo.png` (logo officiel) via
+> `packaging/make-logo-detoure.ps1` (fond gris rendu transparent) puis
+> `packaging/make-icons.ps1` (toutes les tailles).
 
 **Ordre correct** (déjà implémenté dans `packaging/build-release.ps1`) :
 `cargo build` → `dist\Faraday\` → *(signature du lot si `-SignAppFiles`)* → zip portable →
