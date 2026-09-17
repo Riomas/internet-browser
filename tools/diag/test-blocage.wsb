@@ -1,0 +1,23 @@
+<Configuration>
+  <!-- Faraday - test TEMOIN : quels fichiers la politique de controle d'application
+       de cette machine laisse-t-elle executer ? (distingue un probleme de binaire
+       d'une politique de l'environnement). Journal : C:\Diag\out\test-blocage.log
+       Voir docs/TEST_VM.md. -->
+  <VGpu>Disable</VGpu>
+  <Networking>Disable</Networking>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\Users\mario\Dev\internet-browser\dist</HostFolder>
+      <SandboxFolder>C:\Dist</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>C:\Users\mario\Dev\internet-browser\tools\diag</HostFolder>
+      <SandboxFolder>C:\Diag</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\Diag\test-blocage.ps1</Command>
+  </LogonCommand>
+</Configuration>

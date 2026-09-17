@@ -1,12 +1,13 @@
 # 🧪 Faraday — Test sur machine propre (VM)
 
-> **But** : valider la distribution 0.1.0 sur une machine **sans** Smart App Control
+> **But** : valider la distribution 0.1.2 sur une machine **sans** Smart App Control
 > (qui bloque les binaires non signés) — c'est le point de contrôle final de la Phase 5.
 >
-> ⚠️ Sur ta machine hôte (Windows 11 Pro), **Smart App Control est activé**
-> (`VerifiedAndReputablePolicyState = 1`) : il bloque `faraday.exe` et `libcef.dll`
-> car ils ne sont **pas signés**. Ne désactive pas SAC sur ta machine de travail
-> (c'est irréversible sans réinstaller Windows) → **utilise une VM**.
+> ⚠️ Sur ta machine hôte (Windows 11 Pro), **Smart App Control est activé et APPLIQUÉ**
+> (`VerifiedAndReputablePolicyState = 1`, `CodeIntegrityPolicyEnforcementStatus = 2`) :
+> il bloque tout binaire non réputé (nos binaires signés par notre propre certificat
+> inclus, cf. §4). Ne désactive pas SAC sur ta machine de travail (c'est irréversible
+> sans réinstaller Windows) → **utilise une VM**.
 
 ---
 
@@ -16,8 +17,8 @@ Depuis `C:\Users\mario\Dev\internet-browser\dist\` :
 
 | Fichier | Rôle |
 |---|---|
-| `Faraday-Setup-0.1.0-x64.exe` (131,8 Mo) | Installateur (à tester) |
-| `Faraday-0.1.0-x64-portable.zip` (181,6 Mo) | Version portable (à tester) |
+| `Faraday-Setup-0.1.2-x64.exe` (140 Mo) | Installateur (à tester) |
+| `Faraday-0.1.2-x64-portable.zip` (193 Mo) | Version portable (à tester) |
 | `..\docs\GUIDE_UTILISATEUR.md` | Guide utilisateur (facultatif) |
 
 Astuce : copie ces 2 fichiers via un **dossier partagé** VM ↔ hôte, une clé USB, ou
@@ -154,15 +155,21 @@ décompressé.)
 
 ---
 
-## 4. À noter / limites connues de la v0.1.0
+## 4. À noter / limites connues de la v0.1.2
 
 - ✅ **Runtime C++ embarqué** *(corrigé et VÉRIFIÉ en Windows Sandbox)* : le premier essai
   échouait avec « `VCRUNTIME140.dll` est introuvable ». Le runtime Visual C++
   (`vcruntime140.dll`, `vcruntime140_1.dll`) est désormais **embarqué à côté de l'exe**
   (déploiement « app-local »). **Test de reprise réussi** : Faraday démarre dans un
   environnement propre (Windows Sandbox) sans VC++ Redistributable installé.
-- ℹ️ **Windows Sandbox n'applique pas Smart App Control** : c'est donc un bon environnement
-  de test « machine propre » (le blocage SAC observé sur l'hôte ne s'y reproduit pas).
+- ⛔ **Windows Sandbox n'est PLUS un environnement de test valide sur ce poste** (constaté
+  le 17/09/2026) : la sandbox réutilise l'image système de l'hôte, donc **sa** politique
+  Smart App Control s'y applique aussi → `Start-Process` refuse nos binaires avec
+  « Une stratégie de contrôle d'application a bloqué ce fichier », alors que `cmd.exe`
+  (Microsoft) se lance. Un test témoin prêt à l'emploi vérifie cela :
+  `tools\diag\test-blocage.wsb` (journal `tools\diag\out\test-blocage.log`).
+  `tools\diag\install-e2e.ps1` détecte ce cas et conclut « ENVIRONNEMENT BLOQUANT …
+  test NON CONCLUANT » au lieu de signaler un échec d'installation.
 - **Non signée** : sur une machine avec Smart App Control ou une politique WDAC stricte,
   le lancement sera bloqué → signature de code nécessaire pour une diffusion publique.
 - **Sandbox Chromium : ACTIF** — la variante packagée avec `-Sandbox` lance l'application via
