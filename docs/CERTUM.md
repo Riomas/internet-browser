@@ -103,15 +103,15 @@ Puis, dans la session : double-clic sur `faraday.exe` → la fenêtre doit s'ouv
 Les binaires signés ne peuvent pas être produits par la CI (la clé reste dans le coffre
 SimplySign) : **on signe localement, on publie ensuite**.
 
-1. Incrémenter la version : `version = "0.1.1"` dans `Cargo.toml`.
+1. Incrémenter la version : `version = "0.1.2"` dans `Cargo.toml`.
 2. Signer comme au §4, puis vérifier `dist\SHA256SUMS.txt` (il est régénéré **après**
    signature, donc les empreintes correspondent aux fichiers signés).
 3. Publier la release — deux options :
-   - **Automatique** : `git tag -a v0.1.1 -m "Faraday v0.1.1 (signée)" && git push origin v0.1.1`
+   - **Automatique** : `git tag -a v0.1.2 -m "Faraday v0.1.2 (signée)" && git push origin v0.1.2`
      → la CI crée la release, puis **remplacer** les fichiers par les versions signées :
      ```powershell
-     gh release upload v0.1.1 .\dist\Faraday-0.1.1-x64-portable.zip `
-         .\dist\Faraday-Setup-0.1.1-x64.exe .\dist\SHA256SUMS.txt --clobber
+     gh release upload v0.1.2 .\dist\Faraday-0.1.2-x64-portable.zip `
+         .\dist\Faraday-Setup-0.1.2-x64.exe .\dist\SHA256SUMS.txt --clobber
      ```
    - **Manuelle** : page *Releases* → supprimer les fichiers non signés → glisser-déposer
      les fichiers signés de `dist\`.

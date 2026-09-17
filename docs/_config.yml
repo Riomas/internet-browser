@@ -16,5 +16,5 @@ github:
   is_project_page: true
   owner_name: Riomas
   repository_name: internet-browser
-  zip_url: https://github.com/Riomas/internet-browser/releases/latest/download/Faraday-Setup-0.1.1-x64.exe
-  tar_url: https://github.com/Riomas/internet-browser/releases/latest/download/Faraday-0.1.1-x64-portable.zip
+  zip_url: https://github.com/Riomas/internet-browser/releases/latest/download/Faraday-Setup-0.1.2-x64.exe
+  tar_url: https://github.com/Riomas/internet-browser/releases/latest/download/Faraday-0.1.2-x64-portable.zip

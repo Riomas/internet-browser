@@ -30,7 +30,7 @@
 | `faraday.dll` | Code de l'application (variante sandbox) |
 | `faraday_helper.exe` | Processus enfant CEF |
 | `chrome_elf.dll` | Préchargé par le bootstrap : **contrôlé** pour la signature |
-| `Faraday-Setup-0.1.1-x64.exe` | Installateur (évite l'alerte « Éditeur inconnu ») |
+| `Faraday-Setup-0.1.2-x64.exe` | Installateur (évite l'alerte « Éditeur inconnu ») |
 
 > ⚠️ **Contrainte CEF (à connaitre absolument)** : au démarrage, `bootstrap.exe` vérifie la
 > signature de `faraday.exe`, puis de `chrome_elf.dll`, puis de `faraday.dll`. La règle est
@@ -115,8 +115,8 @@ Le script :
 
 ```powershell
 # L'installateur est toujours signé
-signtool verify /pa /v "dist\Faraday-Setup-0.1.1-x64.exe"
-Get-AuthenticodeSignature "dist\Faraday-Setup-0.1.1-x64.exe" | Format-List Status, SignerCertificate
+signtool verify /pa /v "dist\Faraday-Setup-0.1.2-x64.exe"
+Get-AuthenticodeSignature "dist\Faraday-Setup-0.1.2-x64.exe" | Format-List Status, SignerCertificate
 
 # Le lot applicatif : "NotSigned" par défaut (voir §2), ou "Valid" avec -SignAppFiles
 Get-AuthenticodeSignature "dist\Faraday\faraday.exe" | Format-List Status

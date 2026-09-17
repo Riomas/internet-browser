@@ -16,8 +16,8 @@ rien à configurer, vous êtes protégé dès le premier clic.
 
 | Fichier | Utilisation |
 |---|---|
-| `Faraday-Setup-0.1.1-x64.exe` | **installateur** — installation pour votre compte, **sans droits administrateur** |
-| `Faraday-0.1.1-x64-portable.zip` | **version portable** — décompresser, approuver le certificat, lancer `faraday.exe` |
+| `Faraday-Setup-0.1.2-x64.exe` | **installateur** — installation pour votre compte, **sans droits administrateur** |
+| `Faraday-0.1.2-x64-portable.zip` | **version portable** — décompresser, approuver le certificat, lancer `faraday.exe` |
 | `SHA256SUMS.txt` | empreintes SHA-256 pour vérifier l'intégrité |
 
 **[→ Page des versions (releases)](https://github.com/Riomas/internet-browser/releases)**
@@ -26,7 +26,7 @@ rien à configurer, vous êtes protégé dès le premier clic.
 
 ## Installation en deux étapes
 
-1. Lancez `Faraday-Setup-0.1.1-x64.exe` et suivez l'assistant (aucun mot de passe
+1. Lancez `Faraday-Setup-0.1.2-x64.exe` et suivez l'assistant (aucun mot de passe
    administrateur demandé).
 2. À l'écran **« Certificat de signature Faraday »**, laissez la case cochée : le certificat
    public de Faraday est ajouté aux certificats de confiance de **votre compte**

@@ -1,3 +1,35 @@
+# Faraday v0.1.2
+
+Version de **distribution** : mêmes fonctions que la v0.1.1, avec la **nouvelle identité
+visuelle** de Faraday (logo « bouclier bleu + F ») appliquée à toute la distribution.
+
+## Nouvelle icône
+
+- Icône de l'application (`.ico` 16/24/32/48/64/128/256), icône de fenêtre (barre des
+  tâches, Alt+Tab), raccourcis Windows, installateur et **favicon du site**.
+- Logo au fond détouré (vraie transparence) : rendu net sur thème clair comme sur thème
+  sombre ; déclinaisons PNG de 16 à 1024 px.
+
+## Inchangé
+
+- Protection : blocage des trackers/publicités, filtrage des cookies tiers, Do Not Track,
+  HTTPS forcé, **sandbox Chromium** ; déblocage ponctuel par site et suspension temporaire.
+- Fonctions : onglets, favoris, historique, téléchargements, profils, thème clair/sombre.
+- Binaires **signés** par un certificat auto-signé `CN=Faraday, O=Faraday Project` :
+  l'installateur propose de l'approuver pour votre compte (aucun droit administrateur).
+
+## Installation
+
+| Fichier | Utilisation |
+|---|---|
+| `Faraday-0.1.2-x64-portable.zip` | version portable : approuver le certificat, puis lancer `faraday.exe` |
+| `Faraday-Setup-0.1.2-x64.exe` | installateur par utilisateur (**sans droits administrateur**) |
+| `SHA256SUMS.txt` | empreintes SHA-256 pour vérifier l'intégrité |
+
+**Prérequis** : Windows 10 (1809+) ou Windows 11, 64 bits.
+
+---
+
 # Faraday v0.1.1
 
 Version de **distribution** : mêmes fonctions que la v0.1.0, mais les binaires sont

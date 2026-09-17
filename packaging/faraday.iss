@@ -6,7 +6,7 @@
 ; distribution non signée. Le dossier de données reste dans %APPDATA%\Faraday.
 
 #ifndef FaradayVersion
-  #define FaradayVersion "0.1.1"
+  #define FaradayVersion "0.1.2"
 #endif
 
 #define AppName      "Faraday"

@@ -10,7 +10,7 @@
 ## 1. Installation
 
 ### Version portable (aucune installation)
-1. Décompressez `Faraday-0.1.1-x64-portable.zip`.
+1. Décompressez `Faraday-0.1.2-x64-portable.zip`.
 2. **Approuvez le certificat de signature** (une seule fois, sans droits administrateur) —
    dans le dossier décompressé :
    ```powershell
@@ -30,7 +30,7 @@ Vos données (onglets, historique, réglages) sont enregistrées dans
 déplacer le dossier Faraday sans rien perdre.
 
 ### Version installateur (`.exe`)
-1. Lancez `Faraday-Setup-0.1.1-x64.exe`.
+1. Lancez `Faraday-Setup-0.1.2-x64.exe`.
 2. Suivez l'assistant (installation **pour votre compte uniquement**, sans mot de
    passe administrateur).
 3. À l'écran **« Certificat de signature Faraday »**, laissez la case cochée : le certificat
@@ -245,4 +245,4 @@ RESEAU trackersimulator.org (site=example.com exempt=non) -> BLOQUE
 
 ---
 
-*Faraday v0.1.1 — Windows 10 / 11 (64 bits).*
+*Faraday v0.1.2 — Windows 10 / 11 (64 bits).*

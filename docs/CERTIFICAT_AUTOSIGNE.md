@@ -41,7 +41,7 @@ l'approuve. `libcef.dll` reste non signé (binaire amont CEF) : voir la limite �
 
 ## 2. Comment ça marche (parcours utilisateur)
 
-1. L'utilisateur lance `Faraday-Setup-0.1.1-x64.exe`.
+1. L'utilisateur lance `Faraday-Setup-0.1.2-x64.exe`.
 2. À l'écran **« Certificat de signature Faraday »**, une case est cochée par défaut :
 
    > *« Approuver le certificat de signature Faraday pour mon compte utilisateur »*
@@ -68,10 +68,10 @@ laisserait une application incapable de démarrer.
 
 ```powershell
 # Déploiement silencieux : certificat approuvé (défaut)
-Faraday-Setup-0.1.1-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+Faraday-Setup-0.1.2-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 # Déploiement silencieux SANS approuver le certificat
-Faraday-Setup-0.1.1-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCERT=1
+Faraday-Setup-0.1.2-x64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCERT=1
 ```
 
 > Avec `/NOCERT=1`, l'application est installée mais **ne démarrera pas** avant approbation

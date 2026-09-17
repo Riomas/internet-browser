@@ -1,6 +1,6 @@
 # 🔒 Faraday — Politique de confidentialité
 
-**Dernière mise à jour : 16 septembre 2026** · Version du logiciel : 0.1.1
+**Dernière mise à jour : 17 septembre 2026** · Version du logiciel : 0.1.2
 
 Faraday est un navigateur web « privacy-first ». Son principe de conception est simple :
 **tout ce que fait Faraday reste sur votre machine**, et rien n'est transmis à qui que ce

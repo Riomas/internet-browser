@@ -23,6 +23,6 @@
     </MappedFolder>
   </MappedFolders>
   <LogonCommand>
-    <Command>C:\Dist\Faraday-Setup-0.1.1-x64.exe</Command>
+      <Command>C:\Dist\Faraday-Setup-0.1.2-x64.exe</Command>
   </LogonCommand>
 </Configuration>

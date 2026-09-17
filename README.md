@@ -67,6 +67,9 @@ publicité rejetés avant chargement).
 
 ## État du projet
 
+- **v0.1.2** — nouvelle **identité visuelle** : le logo officiel est appliqué à toute la
+  distribution (icône de l'application et de la fenêtre, raccourcis, installateur,
+  favicon du site), détouré et décliné de 16 à 1024 px.
 - **v0.1.1** — distribution **signée** : lot applicatif et installateur signés par un
   certificat auto-signé (`CN=Faraday`), que l'installateur propose d'approuver dans les
   certificats de confiance du compte utilisateur ([doc](docs/CERTIFICAT_AUTOSIGNE.md)).
@@ -96,8 +99,8 @@ Les versions publiées sont sur la page **[Releases](https://github.com/Riomas/i
 
 | Fichier | Description |
 |---|---|
-| `Faraday-0.1.1-x64-portable.zip` | version **portable** : approuver le certificat, puis lancer `faraday.exe` |
-| `Faraday-Setup-0.1.1-x64.exe` | **installateur** (par utilisateur, sans droits administrateur) |
+| `Faraday-0.1.2-x64-portable.zip` | version **portable** : approuver le certificat, puis lancer `faraday.exe` |
+| `Faraday-Setup-0.1.2-x64.exe` | **installateur** (par utilisateur, sans droits administrateur) |
 | `SHA256SUMS.txt` | empreintes SHA-256 pour vérifier l'intégrité |
 
 > 🔐 Les binaires sont signés par un **certificat auto-signé** fourni dans le lot :

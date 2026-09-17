@@ -419,7 +419,7 @@ SignPath Foundation réserve son certificat aux projets dont la **réputation es
   certificat d'AC, approuvé partout).
 - Envisager de signer aussi **le reste des DLL CEF** (`libcef.dll`, `libEGL.dll`,
   `vk_swiftshader.dll`…) pour les machines où **Smart App Control** est actif.
-- Republier une version signée (nouveau tag, p. ex. `v0.1.1`) et mettre à jour
+- Republier une version signée (nouveau tag, p. ex. `v0.1.2`) et mettre à jour
   `docs/SIGNATURE.md` avec l'empreinte et le fournisseur retenus.
 
 ---

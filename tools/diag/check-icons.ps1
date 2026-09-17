@@ -21,9 +21,12 @@ $binaires = @(
     (Join-Path $dist 'Faraday\faraday.exe'),
     (Join-Path $dist 'Faraday\faraday_helper.exe'),
     (Join-Path $dist 'Faraday\faraday.dll'),
-    (Join-Path $dist 'Faraday\chrome_elf.dll'),
-    (Join-Path $dist 'Faraday-Setup-0.1.1-x64.exe')
+    (Join-Path $dist 'Faraday\chrome_elf.dll')
 )
+# Installateur de la version courante (nom versionne : retrouve par motif).
+$setup = Get-ChildItem $dist -Filter 'Faraday-Setup-*-x64.exe' -ErrorAction SilentlyContinue |
+    Sort-Object Name -Descending | Select-Object -First 1
+if ($setup) { $binaires += $setup.FullName }
 
 function Get-IconePixels {
     param([string]$Chemin)

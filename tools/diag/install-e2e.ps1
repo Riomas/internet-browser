@@ -11,7 +11,9 @@
 $ErrorActionPreference = 'Continue'
 $Out = 'C:\Diag\out'
 $Dist = 'C:\Dist'
-$Setup = Join-Path $Dist 'Faraday-Setup-0.1.1-x64.exe'
+# Nom versionne : l'installateur de la version courante est retrouve par motif.
+$Setup = (Get-ChildItem $Dist -Filter 'Faraday-Setup-*-x64.exe' -ErrorAction SilentlyContinue |
+    Sort-Object Name -Descending | Select-Object -First 1).FullName
 $Helper = Join-Path $Dist 'Faraday\faraday-certificat.ps1'
 # Dossier d'installation reel (voir [Setup] DefaultDirName dans packaging\faraday.iss).
 $AppDir = Join-Path $env:LOCALAPPDATA 'Faraday'

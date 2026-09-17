@@ -35,8 +35,14 @@ Write-Host "==> Build signe (certificat : $CertPath)"
 
 Write-Host ""
 Write-Host "Verification des signatures :"
-foreach ($f in @("dist\Faraday\faraday.exe", "dist\Faraday\faraday_helper.exe", "dist\Faraday\faraday.dll", "dist\Faraday-Setup-0.1.0-x64.exe")) {
-    $p = Join-Path (Split-Path -Parent $PSScriptRoot) $f
+$racine = Split-Path -Parent $PSScriptRoot
+$aVerifier = @("dist\Faraday\faraday.exe", "dist\Faraday\faraday_helper.exe", "dist\Faraday\faraday.dll")
+# Installateur de la version courante (nom versionne : retrouve par motif).
+$setup = Get-ChildItem (Join-Path $racine "dist") -Filter "Faraday-Setup-*-x64.exe" -ErrorAction SilentlyContinue |
+    Sort-Object Name -Descending | Select-Object -First 1
+if ($setup) { $aVerifier += ("dist\" + $setup.Name) }
+foreach ($f in $aVerifier) {
+    $p = Join-Path $racine $f
     if (Test-Path $p) {
         $s = Get-AuthenticodeSignature $p
         Write-Host ("  {0,-32} {1}" -f (Split-Path $p -Leaf), $s.Status)
